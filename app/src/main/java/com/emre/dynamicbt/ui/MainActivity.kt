@@ -14,7 +14,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -41,7 +40,9 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -57,17 +58,20 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -77,9 +81,11 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
@@ -90,11 +96,15 @@ import com.emre.dynamicbt.core.ServiceStatus
 import com.emre.dynamicbt.policy.PolicyMode
 import com.emre.dynamicbt.policy.WhitelistStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToLong
 
+@Immutable
 private data class AppEntry(
     val packageName: String,
     val label: String,
@@ -159,6 +169,18 @@ class MainActivity : ComponentActivity() {
         enableHighRefreshRate()
     }
 
+    /**
+     * Some HyperOS/MTK builds reset the window frame rate when the activity
+     * regains focus (dialogs, notifications, app switcher), which shows up as
+     * forced 60 Hz scroll jank. Re-apply on every focus gain.
+     */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            enableHighRefreshRate()
+        }
+    }
+
     private fun enableHighRefreshRate() {
         try {
             val d = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -208,47 +230,54 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/**
+ * Subscribes to a single field of the service status.
+ *
+ * The service pushes a new [ServiceStatus] every second. Collecting the whole
+ * status at the top of the screen meant the entire app list was recomposed
+ * ~1x/second, which is what made 120 Hz scrolling stutter. Each part of the
+ * UI now observes only the slice it renders, with [distinctUntilChanged].
+ */
+@Composable
+private fun <T> selectStatus(initial: T, selector: (ServiceStatus) -> T): T {
+    val flow = remember { DynamicBtServiceState.status.map(selector).distinctUntilChanged() }
+    return flow.collectAsState(initial).value
+}
+
 @Composable
 private fun ArkBtScreen(
     onToggleService: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
     val c = LocalArkColors.current
-    val status by DynamicBtServiceState.status.collectAsState()
 
-    var showAllApps by remember { mutableStateOf(false) }
-    var searchQuery by remember { mutableStateOf("") }
+    val running = selectStatus(false) { it.running }
+    val whitelist = selectStatus(emptySet<String>()) { it.whitelist }
+
+    var selectedTab by rememberSaveable { mutableStateOf(0) }
+    var showAllApps by rememberSaveable { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
     var apps by remember { mutableStateOf<List<AppEntry>>(emptyList()) }
-    var debounceSlider by remember { mutableFloatStateOf(status.config.debounceMs.toFloat()) }
-    var isDraggingSlider by remember { mutableStateOf(false) }
 
-    LaunchedEffect(status.config.debounceMs) {
-        if (!isDraggingSlider) {
-            debounceSlider = status.config.debounceMs.toFloat()
-        }
-    }
+    val statusListState = rememberLazyListState()
+    val appsListState = rememberLazyListState()
 
-    LaunchedEffect(showAllApps) {
+    LaunchedEffect(showAllApps, whitelist) {
         apps = withContext(Dispatchers.IO) {
-            discoverApps(context, showAllApps, status.whitelist)
+            discoverApps(context, showAllApps, whitelist)
         }
     }
 
-    val filteredApps = remember(apps, status.whitelist, searchQuery) {
-        val q = searchQuery.trim().lowercase(Locale.getDefault())
-        val base = if (q.isEmpty()) {
-            apps
-        } else {
-            apps.filter {
-                it.label.lowercase(Locale.getDefault()).contains(q) ||
-                    it.packageName.lowercase(Locale.getDefault()).contains(q)
-            }
+    // Live panel refresh rate, sampled after the activity applied its mode.
+    val view = LocalView.current
+    var refreshRate by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(Unit) {
+        delay(400)
+        refreshRate = try {
+            view.display?.refreshRate ?: 0f
+        } catch (_: Throwable) {
+            0f
         }
-        base.sortedWith(
-            compareByDescending<AppEntry> { it.packageName in status.whitelist }
-                .thenByDescending { it.installed }
-                .thenBy { it.label.lowercase(Locale.getDefault()) }
-        )
     }
 
     val density = LocalDensity.current
@@ -264,108 +293,105 @@ private fun ArkBtScreen(
             .fillMaxSize()
             .background(c.backdropBg)
     ) {
-        // Soft ambient brand glow — one subtle wash instead of the previous dual heavy gradient.
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        c.accent.copy(alpha = if (c.isDark) 0.10f else 0.06f),
-                        Color.Transparent,
-                    ),
-                    center = Offset(size.width * 0.92f, 0f),
-                    radius = size.width * 0.95f,
-                ),
-                radius = size.width * 0.95f,
-                center = Offset(size.width * 0.92f, 0f),
-            )
-        }
+        AmbientBackdrop()
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = 16.dp,
-                end = 16.dp,
-                top = topInset + 8.dp,
-                bottom = bottomInset + 24.dp,
-            ),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item(key = "header") {
-                ArkHeader(running = status.running)
-            }
-
-            item(key = "hero") {
-                TelemetryCard(
-                    status = status,
-                    onToggleService = { onToggleService(!status.running) },
+        Column(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .padding(top = topInset + 8.dp),
+            ) {
+                ArkHeader(running = running)
+                Spacer(Modifier.height(12.dp))
+                ArkTabBar(
+                    selectedTab = selectedTab,
+                    whitelistCount = whitelist.size,
+                    onSelect = { selectedTab = it },
                 )
+                Spacer(Modifier.height(10.dp))
             }
 
-            item(key = "controls") {
-                PolicyCard(
-                    status = status,
-                    debounceSlider = debounceSlider,
-                    onDebounceChange = {
-                        isDraggingSlider = true
-                        debounceSlider = it
-                    },
-                    onDebounceFinished = {
-                        isDraggingSlider = false
-                        val roundedMs = ((debounceSlider / 500f).roundToLong() * 500L)
-                            .coerceIn(0L, 15000L)
-                        DynamicBtServiceState.setDebounceMs(roundedMs)
-                    },
+            when (selectedTab) {
+                0 -> StatusTab(
+                    modifier = Modifier.weight(1f),
+                    listState = statusListState,
+                    bottomInset = bottomInset,
+                    refreshRate = refreshRate,
+                    onToggleService = onToggleService,
                 )
-            }
 
-            item(key = "whitelist_header") {
-                WhitelistCard(
-                    whitelistCount = status.whitelist.size,
+                else -> AppsTab(
+                    modifier = Modifier.weight(1f),
+                    listState = appsListState,
+                    bottomInset = bottomInset,
+                    whitelist = whitelist,
+                    apps = apps,
                     searchQuery = searchQuery,
                     onSearchChange = { searchQuery = it },
                     showAllApps = showAllApps,
                     onShowAllChange = { showAllApps = it },
-                )
-            }
-
-            if (filteredApps.isEmpty()) {
-                item(key = "empty") {
-                    EmptyState(searchQuery = searchQuery)
-                }
-            } else {
-                items(
-                    items = filteredApps,
-                    key = { it.packageName },
-                    contentType = { "app_row" },
-                ) { entry ->
-                    AppRow(
-                        entry = entry,
-                        whitelisted = entry.packageName in status.whitelist,
-                        onToggle = { checked ->
-                            val next = status.whitelist.toMutableSet()
-                            if (checked) next.add(entry.packageName) else next.remove(entry.packageName)
-                            DynamicBtServiceState.updateWhitelist(next)
-                        },
-                    )
-                }
-            }
-
-            item(key = "footer") {
-                Text(
-                    text = "Xe.Ark Audio Engine · ${status.whitelist.size} uygulama Hi-Res whitelist'te",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = c.textTertiary,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp, bottom = 4.dp),
+                    onToggleApp = { pkg, checked ->
+                        val next = whitelist.toMutableSet()
+                        if (checked) next.add(pkg) else next.remove(pkg)
+                        DynamicBtServiceState.updateWhitelist(next)
+                    },
                 )
             }
         }
     }
 }
 
+/**
+ * Static crimson ambience: one warm top wash plus two soft glows. Drawn in a
+ * Canvas that reads no animated state, so it is recorded once and never
+ * repainted while scrolling.
+ */
+@Composable
+private fun AmbientBackdrop() {
+    val c = LocalArkColors.current
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        drawRect(
+            brush = Brush.verticalGradient(
+                colors = listOf(
+                    c.accent.copy(alpha = if (c.isDark) 0.11f else 0.05f),
+                    Color.Transparent,
+                ),
+                startY = 0f,
+                endY = size.height * 0.45f,
+            ),
+            size = Size(size.width, size.height * 0.55f),
+        )
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    CrimsonPrimary.copy(alpha = if (c.isDark) 0.17f else 0.08f),
+                    CrimsonDeep.copy(alpha = if (c.isDark) 0.07f else 0.03f),
+                    Color.Transparent,
+                ),
+                center = Offset(size.width * 0.9f, size.height * 0.02f),
+                radius = size.width * 0.8f,
+            ),
+            radius = size.width * 0.8f,
+            center = Offset(size.width * 0.9f, size.height * 0.02f),
+        )
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    CrimsonDeep.copy(alpha = if (c.isDark) 0.13f else 0.05f),
+                    Color.Transparent,
+                ),
+                center = Offset(size.width * 0.05f, size.height * 0.62f),
+                radius = size.width * 0.65f,
+            ),
+            radius = size.width * 0.65f,
+            center = Offset(size.width * 0.05f, size.height * 0.62f),
+        )
+    }
+}
+
 // ---------------------------------------------------------------------------
-// Header
+// Header + tabs
 // ---------------------------------------------------------------------------
 
 @Composable
@@ -391,7 +417,7 @@ private fun ArkHeader(running: Boolean) {
             Text(
                 text = "Xe.Ark Audio Engine",
                 style = MaterialTheme.typography.labelMedium,
-                color = c.textTertiary,
+                color = c.accentSoft,
             )
         }
 
@@ -435,6 +461,267 @@ private fun StatusPill(running: Boolean) {
     }
 }
 
+@Composable
+private fun ArkTabBar(
+    selectedTab: Int,
+    whitelistCount: Int,
+    onSelect: (Int) -> Unit,
+) {
+    val c = LocalArkColors.current
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = c.raisedBg.copy(alpha = 0.7f),
+        border = BorderStroke(1.dp, c.border),
+    ) {
+        Row(
+            modifier = Modifier.padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            ArkTab(
+                text = "Durum",
+                selected = selectedTab == 0,
+                onClick = { onSelect(0) },
+                modifier = Modifier.weight(1f),
+            )
+            ArkTab(
+                text = "Uygulamalar",
+                badge = whitelistCount,
+                selected = selectedTab == 1,
+                onClick = { onSelect(1) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ArkTab(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    badge: Int? = null,
+) {
+    val c = LocalArkColors.current
+    val bg by animateColorAsState(
+        targetValue = if (selected) c.accent else Color.Transparent,
+        animationSpec = tween(180),
+        label = "tabBg",
+    )
+    val fg by animateColorAsState(
+        targetValue = if (selected) c.onAccent else c.textSecondary,
+        animationSpec = tween(180),
+        label = "tabFg",
+    )
+
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        color = bg,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 10.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge,
+                color = fg,
+            )
+            if (badge != null && badge > 0) {
+                Spacer(Modifier.width(6.dp))
+                Surface(
+                    shape = CircleShape,
+                    color = if (selected) {
+                        c.onAccent.copy(alpha = 0.18f)
+                    } else {
+                        c.accent.copy(alpha = 0.16f)
+                    },
+                ) {
+                    Text(
+                        text = badge.toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (selected) c.onAccent else c.accentSoft,
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tab 1: status
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun StatusTab(
+    modifier: Modifier,
+    listState: LazyListState,
+    bottomInset: Dp,
+    refreshRate: Float,
+    onToggleService: (Boolean) -> Unit,
+) {
+    val status by DynamicBtServiceState.status.collectAsState()
+
+    var debounceSlider by remember { mutableFloatStateOf(status.config.debounceMs.toFloat()) }
+    var isDraggingSlider by remember { mutableStateOf(false) }
+
+    LaunchedEffect(status.config.debounceMs) {
+        if (!isDraggingSlider) {
+            debounceSlider = status.config.debounceMs.toFloat()
+        }
+    }
+
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        state = listState,
+        contentPadding = PaddingValues(
+            start = 16.dp,
+            end = 16.dp,
+            top = 2.dp,
+            bottom = bottomInset + 24.dp,
+        ),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item(key = "hero") {
+            TelemetryCard(
+                status = status,
+                onToggleService = { onToggleService(!status.running) },
+            )
+        }
+
+        item(key = "controls") {
+            PolicyCard(
+                status = status,
+                debounceSlider = debounceSlider,
+                onDebounceChange = {
+                    isDraggingSlider = true
+                    debounceSlider = it
+                },
+                onDebounceFinished = {
+                    isDraggingSlider = false
+                    val roundedMs = ((debounceSlider / 500f).roundToLong() * 500L)
+                        .coerceIn(0L, 10000L)
+                    DynamicBtServiceState.setDebounceMs(roundedMs)
+                },
+            )
+        }
+
+        item(key = "footer") {
+            FooterLine(
+                text = buildString {
+                    append("Xe.Ark Audio Engine")
+                    if (refreshRate > 0f) {
+                        append(" · ")
+                        append(refreshRate.roundToLong())
+                        append(" Hz")
+                    }
+                    append(" · ${status.whitelist.size} uygulama whitelist'te")
+                }
+            )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tab 2: applications
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun AppsTab(
+    modifier: Modifier,
+    listState: LazyListState,
+    bottomInset: Dp,
+    whitelist: Set<String>,
+    apps: List<AppEntry>,
+    searchQuery: String,
+    onSearchChange: (String) -> Unit,
+    showAllApps: Boolean,
+    onShowAllChange: (Boolean) -> Unit,
+    onToggleApp: (String, Boolean) -> Unit,
+) {
+    val filteredApps = remember(apps, whitelist, searchQuery) {
+        val q = searchQuery.trim().lowercase(Locale.getDefault())
+        val base = if (q.isEmpty()) {
+            apps
+        } else {
+            apps.filter {
+                it.label.lowercase(Locale.getDefault()).contains(q) ||
+                    it.packageName.lowercase(Locale.getDefault()).contains(q)
+            }
+        }
+        base.sortedWith(
+            compareByDescending<AppEntry> { it.packageName in whitelist }
+                .thenByDescending { it.installed }
+                .thenBy { it.label.lowercase(Locale.getDefault()) }
+        )
+    }
+
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        state = listState,
+        contentPadding = PaddingValues(
+            start = 16.dp,
+            end = 16.dp,
+            top = 2.dp,
+            bottom = bottomInset + 24.dp,
+        ),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item(key = "whitelist_header") {
+            WhitelistCard(
+                whitelistCount = whitelist.size,
+                searchQuery = searchQuery,
+                onSearchChange = onSearchChange,
+                showAllApps = showAllApps,
+                onShowAllChange = onShowAllChange,
+            )
+        }
+
+        if (filteredApps.isEmpty()) {
+            item(key = "empty") {
+                EmptyState(searchQuery = searchQuery)
+            }
+        } else {
+            items(
+                items = filteredApps,
+                key = { it.packageName },
+                contentType = { "app_row" },
+            ) { entry ->
+                AppRow(
+                    entry = entry,
+                    whitelisted = entry.packageName in whitelist,
+                    onToggle = { onToggleApp(entry.packageName, it) },
+                )
+            }
+        }
+
+        item(key = "footer") {
+            FooterLine(
+                text = "Whitelist dışındaki uygulamalar varsayılan profili kullanır",
+            )
+        }
+    }
+}
+
+@Composable
+private fun FooterLine(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = LocalArkColors.current.textTertiary,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp, bottom = 4.dp),
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Telemetry
 // ---------------------------------------------------------------------------
@@ -475,9 +762,7 @@ private fun TelemetryCard(
     val codecLabel = if (status.a2dp.connected) status.a2dp.codecName.uppercase(Locale.getDefault()) else "—"
 
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .animateContentSize(),
+        modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
         color = c.surfaceBg,
         border = BorderStroke(1.dp, c.border),
@@ -537,10 +822,7 @@ private fun TelemetryCard(
 
             Spacer(Modifier.height(2.dp))
             Text(
-                text = buildString {
-                    append("$displayBits-bit")
-                    append("  ·  hedef ${formatKhz(status.targetRateHz)} kHz / ${status.targetBits}-bit")
-                },
+                text = "$displayBits-bit  ·  hedef ${formatKhz(status.targetRateHz)} kHz / ${status.targetBits}-bit",
                 style = MaterialTheme.typography.bodyMedium,
                 color = c.textSecondary,
             )
@@ -639,8 +921,8 @@ private fun TelemetryCard(
 private fun ModePill(label: String, color: Color) {
     Surface(
         shape = CircleShape,
-        color = color.copy(alpha = 0.10f),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.30f)),
+        color = color.copy(alpha = 0.12f),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.32f)),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
@@ -739,7 +1021,8 @@ private fun HiResBadge(text: String) {
     val c = LocalArkColors.current
     Surface(
         shape = RoundedCornerShape(6.dp),
-        color = c.accent.copy(alpha = 0.14f),
+        color = c.accent.copy(alpha = 0.16f),
+        border = BorderStroke(1.dp, c.accent.copy(alpha = 0.30f)),
     ) {
         Text(
             text = text,
@@ -755,7 +1038,7 @@ private fun SmallChip(text: String, active: Boolean, accent: Color) {
     val c = LocalArkColors.current
     Surface(
         shape = CircleShape,
-        color = if (active) accent.copy(alpha = 0.16f) else c.raisedBg,
+        color = if (active) accent.copy(alpha = 0.18f) else c.raisedBg,
         border = BorderStroke(1.dp, if (active) accent.copy(alpha = 0.55f) else c.border),
     ) {
         Text(
@@ -895,7 +1178,7 @@ private fun PolicyCard(
             }
 
             Spacer(Modifier.height(18.dp))
-            val secs = (debounceSlider / 1000f)
+            val secs = debounceSlider / 1000f
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -916,7 +1199,7 @@ private fun PolicyCard(
                 Spacer(Modifier.width(12.dp))
                 Surface(
                     shape = CircleShape,
-                    color = c.accent.copy(alpha = 0.12f),
+                    color = c.accent.copy(alpha = 0.14f),
                     border = BorderStroke(1.dp, c.accent.copy(alpha = 0.35f)),
                 ) {
                     Text(
@@ -1043,13 +1326,13 @@ private fun WhitelistCard(
                 )
                 Surface(
                     shape = CircleShape,
-                    color = c.raisedBg,
-                    border = BorderStroke(1.dp, c.border),
+                    color = c.accentContainer,
+                    border = BorderStroke(1.dp, c.accent.copy(alpha = 0.30f)),
                 ) {
                     Text(
                         text = "$whitelistCount seçili",
                         style = MaterialTheme.typography.labelMedium,
-                        color = c.textSecondary,
+                        color = c.accentSoft,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                     )
                 }
@@ -1205,18 +1488,16 @@ private fun AppRow(
     onToggle: (Boolean) -> Unit,
 ) {
     val c = LocalArkColors.current
-    val borderColor by animateColorAsState(
-        targetValue = if (whitelisted) c.accent.copy(alpha = 0.45f) else Color.Transparent,
-        animationSpec = tween(180),
-        label = "appRowBorder",
-    )
 
     Surface(
         onClick = { onToggle(!whitelisted) },
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
-        color = c.surfaceBg,
-        border = BorderStroke(1.dp, borderColor),
+        color = if (whitelisted) c.accentContainer.copy(alpha = 0.55f) else c.surfaceBg,
+        border = BorderStroke(
+            1.dp,
+            if (whitelisted) c.accent.copy(alpha = 0.45f) else c.border,
+        ),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
