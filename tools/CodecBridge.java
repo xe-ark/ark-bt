@@ -29,6 +29,9 @@ public final class CodecBridge {
 
     private static volatile String sJson;
 
+    /** Why the last device lookup came back empty; folded into error output. */
+    private static String sActiveDeviceError;
+
     private CodecBridge() {
     }
 
@@ -194,7 +197,8 @@ public final class CodecBridge {
     private static String execute(BluetoothProfile proxy, String action, int rate, int bits) {
         Object device = activeDevice(proxy);
         if (device == null) {
-            return error("no_active_device");
+            return error("no_active_device"
+                    + (sActiveDeviceError != null ? ": " + sActiveDeviceError : ""));
         }
 
         Object status;
@@ -377,6 +381,28 @@ public final class CodecBridge {
             Class<?> stub = Class.forName("android.bluetooth.IBluetoothManager$Stub");
             Method asInterface = stub.getMethod("asInterface", android.os.IBinder.class);
             Object service = asInterface.invoke(null, binder);
+
+            // The adapter stamps every binder call with an AttributionSource.
+            // If its uid does not match the real calling uid, the Bluetooth
+            // service rejects the call, so build one for uid 0 (root).
+            Object attributionSource = buildAttributionSource(context, 0);
+
+            for (java.lang.reflect.Constructor<?> ctor
+                    : BluetoothAdapter.class.getDeclaredConstructors()) {
+                Class<?>[] types = ctor.getParameterTypes();
+                if (types.length == 3
+                        && attributionSource != null
+                        && types[0].isInstance(service)
+                        && types[1].isInstance(context)
+                        && types[2].isInstance(attributionSource)) {
+                    ctor.setAccessible(true);
+                    BluetoothAdapter adapter =
+                            (BluetoothAdapter) ctor.newInstance(service, context, attributionSource);
+                    System.err.println("built BluetoothAdapter from binder (uid 0 attribution)");
+                    return adapter;
+                }
+            }
+
             for (java.lang.reflect.Constructor<?> ctor
                     : BluetoothAdapter.class.getDeclaredConstructors()) {
                 Class<?>[] types = ctor.getParameterTypes();
@@ -385,7 +411,7 @@ public final class CodecBridge {
                         && types[1].isInstance(context)) {
                     ctor.setAccessible(true);
                     BluetoothAdapter adapter = (BluetoothAdapter) ctor.newInstance(service, context);
-                    System.err.println("built BluetoothAdapter from binder");
+                    System.err.println("built BluetoothAdapter from binder (default attribution)");
                     return adapter;
                 }
             }
@@ -403,20 +429,65 @@ public final class CodecBridge {
         return getService.invoke(null, name);
     }
 
+    /**
+     * Builds an {@code android.content.AttributionSource} for [uid].
+     *
+     * Binder calls from this process are stamped with the adapter's
+     * attribution source, and the Bluetooth service validates codec access
+     * against that uid rather than the process uid. Building one for uid 0
+     * makes the framework treat the write as root.
+     */
+    private static Object buildAttributionSource(Context context, int uid) {
+        try {
+            Class<?> builderClass = Class.forName("android.content.AttributionSource$Builder");
+            Object builder = null;
+            for (java.lang.reflect.Constructor<?> ctor : builderClass.getDeclaredConstructors()) {
+                Class<?>[] types = ctor.getParameterTypes();
+                if (types.length == 1 && types[0] == int.class) {
+                    ctor.setAccessible(true);
+                    builder = ctor.newInstance(uid);
+                    break;
+                }
+            }
+            if (builder == null) {
+                System.err.println("no AttributionSource.Builder(int) constructor");
+                return null;
+            }
+            try {
+                callChecked(
+                        builder,
+                        "setPackageName",
+                        new Class<?>[]{String.class},
+                        context.getPackageName()
+                );
+            } catch (Throwable t) {
+                System.err.println("setPackageName failed: " + describe(t));
+            }
+            return callChecked(builder, "build", new Class<?>[]{});
+        } catch (Throwable t) {
+            System.err.println("buildAttributionSource failed: " + describe(t));
+            return null;
+        }
+    }
+
     private static Object activeDevice(BluetoothProfile proxy) {
         try {
             Object device = call(proxy, "getActiveDevice", new Class<?>[]{});
             if (device != null) {
                 return device;
             }
-        } catch (Throwable ignored) {
+            sActiveDeviceError = "getActiveDevice returned null";
+        } catch (Throwable t) {
+            sActiveDeviceError = "getActiveDevice: " + describe(t);
         }
         try {
             List<?> connected = proxy.getConnectedDevices();
             if (connected != null && !connected.isEmpty()) {
                 return connected.get(0);
             }
-        } catch (Throwable ignored) {
+            sActiveDeviceError += " / getConnectedDevices empty";
+        } catch (Throwable t) {
+            sActiveDeviceError += " / getConnectedDevices: " + describe(t);
         }
         return null;
     }
