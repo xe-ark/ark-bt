@@ -434,11 +434,27 @@ public final class CodecBridge {
      * bootstrap, so `android.os.BluetoothServiceManager` has no service
      * registerer and every profile call throws a NullPointerException. Calling
      * the module initializer by hand restores normal behavior.
+     *
+     * `SystemServiceRegistry` refuses module registration unless it is inside
+     * its own initialization, so that guard flag is raised around the call.
      */
-    private static void ensureBluetoothFrameworkInitialized() {
+    private static synchronized void ensureBluetoothFrameworkInitialized() {
         if (sFrameworkInitialized) {
             return;
         }
+
+        java.lang.reflect.Field initializing = null;
+        boolean previous = false;
+        try {
+            Class<?> registry = Class.forName("android.app.SystemServiceRegistry");
+            initializing = registry.getDeclaredField("mIsInitializing");
+            initializing.setAccessible(true);
+            previous = initializing.getBoolean(null);
+            initializing.setBoolean(null, true);
+        } catch (Throwable t) {
+            System.err.println("could not raise SystemServiceRegistry guard: " + describe(t));
+        }
+
         try {
             Class<?> initializer = Class.forName("android.bluetooth.BluetoothFrameworkInitializer");
             Method register = initializer.getDeclaredMethod("registerServiceWrappers");
@@ -448,6 +464,13 @@ public final class CodecBridge {
             System.err.println("BluetoothFrameworkInitializer.registerServiceWrappers() ok");
         } catch (Throwable t) {
             System.err.println("Bluetooth framework init failed: " + describe(t));
+        } finally {
+            if (initializing != null) {
+                try {
+                    initializing.setBoolean(null, previous);
+                } catch (Throwable ignored) {
+                }
+            }
         }
     }
 
