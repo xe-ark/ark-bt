@@ -32,6 +32,8 @@ public final class CodecBridge {
     /** Why the last device lookup came back empty; folded into error output. */
     private static String sActiveDeviceError;
 
+    private static boolean sFrameworkInitialized;
+
     private CodecBridge() {
     }
 
@@ -52,6 +54,8 @@ public final class CodecBridge {
             probe();
             return;
         }
+
+        ensureBluetoothFrameworkInitialized();
 
         final Looper looper = Looper.getMainLooper();
         try {
@@ -361,6 +365,7 @@ public final class CodecBridge {
      * the adapter from the raw IBluetoothManager binder works in that case.
      */
     private static BluetoothAdapter resolveAdapter(Context context, BluetoothManager manager) {
+        ensureBluetoothFrameworkInitialized();
         if (manager != null) {
             try {
                 BluetoothAdapter adapter = manager.getAdapter();
@@ -420,6 +425,30 @@ public final class CodecBridge {
             System.err.println("direct adapter build failed: " + describe(t));
         }
         return null;
+    }
+
+    /**
+     * Initializes the Bluetooth framework module wrappers.
+     *
+     * `app_process` starts a bare runtime without the `SystemServiceRegistry`
+     * bootstrap, so `android.os.BluetoothServiceManager` has no service
+     * registerer and every profile call throws a NullPointerException. Calling
+     * the module initializer by hand restores normal behavior.
+     */
+    private static void ensureBluetoothFrameworkInitialized() {
+        if (sFrameworkInitialized) {
+            return;
+        }
+        try {
+            Class<?> initializer = Class.forName("android.bluetooth.BluetoothFrameworkInitializer");
+            Method register = initializer.getDeclaredMethod("registerServiceWrappers");
+            register.setAccessible(true);
+            register.invoke(null);
+            sFrameworkInitialized = true;
+            System.err.println("BluetoothFrameworkInitializer.registerServiceWrappers() ok");
+        } catch (Throwable t) {
+            System.err.println("Bluetooth framework init failed: " + describe(t));
+        }
     }
 
     private static Object serviceBinder(String name) throws Exception {
