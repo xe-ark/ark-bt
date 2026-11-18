@@ -37,6 +37,11 @@ public final class CodecBridge {
         final int rate = args.length > 1 ? safeInt(args[1]) : 0;
         final int bits = args.length > 2 ? safeInt(args[2]) : 0;
 
+        if ("probe".equals(action)) {
+            probe();
+            return;
+        }
+
         try {
             if (Looper.getMainLooper() == null) {
                 Looper.prepareMainLooper();
@@ -103,6 +108,51 @@ public final class CodecBridge {
         }
 
         print(sJson != null ? sJson : error("no_result"));
+    }
+
+    /**
+     * Diagnostic entry point: reports whether this process can see system
+     * services at all. Kept in the shipped jar because it is tiny and makes
+     * field debugging possible without a rebuilt APK.
+     */
+    private static void probe() {
+        StringBuilder sb = new StringBuilder(256);
+        sb.append('{');
+        try {
+            Class<?> sm = Class.forName("android.os.ServiceManager");
+            Method get = sm.getDeclaredMethod("getService", String.class);
+            get.setAccessible(true);
+            Object binder = get.invoke(null, "bluetooth_manager");
+            sb.append("\"binder\":").append(binder != null).append(',');
+
+            Method list = sm.getDeclaredMethod("listServices");
+            list.setAccessible(true);
+            String[] names = (String[]) list.invoke(null);
+            int btServices = 0;
+            if (names != null) {
+                for (String name : names) {
+                    if (name != null && name.contains("bluetooth")) {
+                        btServices++;
+                    }
+                }
+            }
+            sb.append("\"services\":").append(names == null ? -1 : names.length).append(',');
+            sb.append("\"btServices\":").append(btServices).append(',');
+
+            Class<?> adapterClass = Class.forName("android.bluetooth.BluetoothAdapter");
+            Method defaultAdapter = adapterClass.getDeclaredMethod("getDefaultAdapter");
+            defaultAdapter.setAccessible(true);
+            Object adapter = defaultAdapter.invoke(null);
+            sb.append("\"adapter\":").append(adapter != null).append(',');
+            sb.append("\"state\":").append(adapter != null
+                    ? String.valueOf(call(adapter, "getState", new Class<?>[]{}))
+                    : "null");
+        } catch (Throwable t) {
+            sb.append("\"error\":\"").append(escape(describe(t))).append("\",");
+            sb.append("\"adapter\":false");
+        }
+        sb.append('}');
+        print(sb.toString());
     }
 
     private static String execute(BluetoothProfile proxy, String action, int rate, int bits) {
