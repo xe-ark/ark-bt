@@ -13,8 +13,27 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -24,6 +43,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -34,6 +54,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -69,6 +90,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -312,31 +334,51 @@ private fun ArkBtScreen(
                 Spacer(Modifier.height(10.dp))
             }
 
-            when (selectedTab) {
-                0 -> StatusTab(
-                    modifier = Modifier.weight(1f),
-                    listState = statusListState,
-                    bottomInset = bottomInset,
-                    refreshRate = refreshRate,
-                    onToggleService = onToggleService,
-                )
-
-                else -> AppsTab(
-                    modifier = Modifier.weight(1f),
-                    listState = appsListState,
-                    bottomInset = bottomInset,
-                    whitelist = whitelist,
-                    apps = apps,
-                    searchQuery = searchQuery,
-                    onSearchChange = { searchQuery = it },
-                    showAllApps = showAllApps,
-                    onShowAllChange = { showAllApps = it },
-                    onToggleApp = { pkg, checked ->
-                        val next = whitelist.toMutableSet()
-                        if (checked) next.add(pkg) else next.remove(pkg)
-                        DynamicBtServiceState.updateWhitelist(next)
-                    },
-                )
+            AnimatedContent(
+                targetState = selectedTab,
+                transitionSpec = {
+                    val direction = if (targetState > initialState) 1 else -1
+                    (
+                        slideInHorizontally(
+                            animationSpec = tween(320, easing = FastOutSlowInEasing),
+                        ) { width -> direction * (width / 7) } +
+                            fadeIn(tween(240))
+                        ) togetherWith (
+                        slideOutHorizontally(
+                            animationSpec = tween(240, easing = FastOutSlowInEasing),
+                        ) { width -> -direction * (width / 9) } +
+                            fadeOut(tween(160))
+                        )
+                },
+                modifier = Modifier.weight(1f),
+                label = "tabContent",
+            ) { tab ->
+                if (tab == 0) {
+                    StatusTab(
+                        modifier = Modifier.fillMaxSize(),
+                        listState = statusListState,
+                        bottomInset = bottomInset,
+                        refreshRate = refreshRate,
+                        onToggleService = onToggleService,
+                    )
+                } else {
+                    AppsTab(
+                        modifier = Modifier.fillMaxSize(),
+                        listState = appsListState,
+                        bottomInset = bottomInset,
+                        whitelist = whitelist,
+                        apps = apps,
+                        searchQuery = searchQuery,
+                        onSearchChange = { searchQuery = it },
+                        showAllApps = showAllApps,
+                        onShowAllChange = { showAllApps = it },
+                        onToggleApp = { pkg, checked ->
+                            val next = whitelist.toMutableSet()
+                            if (checked) next.add(pkg) else next.remove(pkg)
+                            DynamicBtServiceState.updateWhitelist(next)
+                        },
+                    )
+                }
             }
         }
     }
@@ -433,9 +475,24 @@ private fun StatusPill(running: Boolean) {
         animationSpec = tween(220),
         label = "statusDot",
     )
+    val containerColor by animateColorAsState(
+        targetValue = if (running) c.success.copy(alpha = 0.10f) else c.raisedBg,
+        animationSpec = tween(260),
+        label = "statusContainer",
+    )
+    val pulse by rememberInfiniteTransition(label = "liveDot").animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "liveDotPulse",
+    )
+
     Surface(
         shape = CircleShape,
-        color = if (running) c.success.copy(alpha = 0.10f) else c.raisedBg,
+        color = containerColor,
         border = BorderStroke(
             width = 1.dp,
             color = if (running) c.success.copy(alpha = 0.35f) else c.border,
@@ -447,16 +504,24 @@ private fun StatusPill(running: Boolean) {
         ) {
             Box(
                 modifier = Modifier
-                    .size(7.dp)
+                    .size(8.dp)
                     .clip(CircleShape)
-                    .background(dotColor),
+                    .background(dotColor.copy(alpha = if (running) pulse else 0.6f)),
             )
             Spacer(Modifier.width(7.dp))
-            Text(
-                text = if (running) "Aktif" else "Durduruldu",
-                style = MaterialTheme.typography.labelLarge,
-                color = if (running) c.textPrimary else c.textSecondary,
-            )
+            AnimatedContent(
+                targetState = running,
+                transitionSpec = {
+                    fadeIn(tween(200)) togetherWith fadeOut(tween(120))
+                },
+                label = "statusLabel",
+            ) { isRunning ->
+                Text(
+                    text = if (isRunning) "Aktif" else "Durduruldu",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (isRunning) c.textPrimary else c.textSecondary,
+                )
+            }
         }
     }
 }
@@ -474,23 +539,43 @@ private fun ArkTabBar(
         color = c.raisedBg.copy(alpha = 0.7f),
         border = BorderStroke(1.dp, c.border),
     ) {
-        Row(
-            modifier = Modifier.padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            ArkTab(
-                text = "Durum",
-                selected = selectedTab == 0,
-                onClick = { onSelect(0) },
-                modifier = Modifier.weight(1f),
+        BoxWithConstraints(modifier = Modifier.padding(4.dp)) {
+            val gap = 4.dp
+            val tabWidth = (maxWidth - gap) / 2
+            val indicatorOffset by animateDpAsState(
+                targetValue = if (selectedTab == 0) 0.dp else tabWidth + gap,
+                animationSpec = tween(320, easing = FastOutSlowInEasing),
+                label = "tabIndicator",
             )
-            ArkTab(
-                text = "Uygulamalar",
-                badge = whitelistCount,
-                selected = selectedTab == 1,
-                onClick = { onSelect(1) },
-                modifier = Modifier.weight(1f),
+
+            // Sliding selection pill — drawn before the labels so it sits below.
+            Box(
+                modifier = Modifier
+                    .offset(x = indicatorOffset)
+                    .width(tabWidth)
+                    .height(38.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(c.accent),
             )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(gap),
+            ) {
+                ArkTab(
+                    text = "Durum",
+                    selected = selectedTab == 0,
+                    onClick = { onSelect(0) },
+                    modifier = Modifier.weight(1f),
+                )
+                ArkTab(
+                    text = "Uygulamalar",
+                    badge = whitelistCount,
+                    selected = selectedTab == 1,
+                    onClick = { onSelect(1) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
     }
 }
@@ -504,28 +589,29 @@ private fun ArkTab(
     badge: Int? = null,
 ) {
     val c = LocalArkColors.current
-    val bg by animateColorAsState(
-        targetValue = if (selected) c.accent else Color.Transparent,
-        animationSpec = tween(180),
-        label = "tabBg",
-    )
     val fg by animateColorAsState(
         targetValue = if (selected) c.onAccent else c.textSecondary,
-        animationSpec = tween(180),
+        animationSpec = tween(220),
         label = "tabFg",
     )
+    val badgeBg by animateColorAsState(
+        targetValue = if (selected) {
+            c.onAccent.copy(alpha = 0.20f)
+        } else {
+            c.accent.copy(alpha = 0.16f)
+        },
+        animationSpec = tween(220),
+        label = "tabBadgeBg",
+    )
 
-    Surface(
-        onClick = onClick,
-        modifier = modifier,
-        shape = RoundedCornerShape(12.dp),
-        color = bg,
+    Box(
+        modifier = modifier
+            .height(38.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 10.dp),
-            horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -535,19 +621,16 @@ private fun ArkTab(
             )
             if (badge != null && badge > 0) {
                 Spacer(Modifier.width(6.dp))
-                Surface(
-                    shape = CircleShape,
-                    color = if (selected) {
-                        c.onAccent.copy(alpha = 0.18f)
-                    } else {
-                        c.accent.copy(alpha = 0.16f)
-                    },
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(badgeBg)
+                        .padding(horizontal = 5.dp, vertical = 1.dp),
                 ) {
                     Text(
                         text = badge.toString(),
                         style = MaterialTheme.typography.labelSmall,
                         color = if (selected) c.onAccent else c.accentSoft,
-                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
                     )
                 }
             }
@@ -590,41 +673,47 @@ private fun StatusTab(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item(key = "hero") {
-            TelemetryCard(
-                status = status,
-                onToggleService = { onToggleService(!status.running) },
-            )
+            StaggeredAppear(index = 0) {
+                TelemetryCard(
+                    status = status,
+                    onToggleService = { onToggleService(!status.running) },
+                )
+            }
         }
 
         item(key = "controls") {
-            PolicyCard(
-                status = status,
-                debounceSlider = debounceSlider,
-                onDebounceChange = {
-                    isDraggingSlider = true
-                    debounceSlider = it
-                },
-                onDebounceFinished = {
-                    isDraggingSlider = false
-                    val roundedMs = ((debounceSlider / 500f).roundToLong() * 500L)
-                        .coerceIn(0L, 10000L)
-                    DynamicBtServiceState.setDebounceMs(roundedMs)
-                },
-            )
+            StaggeredAppear(index = 1) {
+                PolicyCard(
+                    status = status,
+                    debounceSlider = debounceSlider,
+                    onDebounceChange = {
+                        isDraggingSlider = true
+                        debounceSlider = it
+                    },
+                    onDebounceFinished = {
+                        isDraggingSlider = false
+                        val roundedMs = ((debounceSlider / 500f).roundToLong() * 500L)
+                            .coerceIn(0L, 10000L)
+                        DynamicBtServiceState.setDebounceMs(roundedMs)
+                    },
+                )
+            }
         }
 
         item(key = "footer") {
-            FooterLine(
-                text = buildString {
-                    append("Xe.Ark Audio Engine")
-                    if (refreshRate > 0f) {
-                        append(" · ")
-                        append(refreshRate.roundToLong())
-                        append(" Hz")
+            StaggeredAppear(index = 2) {
+                FooterLine(
+                    text = buildString {
+                        append("Xe.Ark Audio Engine")
+                        if (refreshRate > 0f) {
+                            append(" · ")
+                            append(refreshRate.roundToLong())
+                            append(" Hz")
+                        }
+                        append(" · ${status.whitelist.size} uygulama whitelist'te")
                     }
-                    append(" · ${status.whitelist.size} uygulama whitelist'te")
-                }
-            )
+                )
+            }
         }
     }
 }
@@ -698,6 +787,8 @@ private fun AppsTab(
                     entry = entry,
                     whitelisted = entry.packageName in whitelist,
                     onToggle = { onToggleApp(entry.packageName, it) },
+                    // Animate rows when the whitelist sort order changes.
+                    modifier = Modifier.animateItem(),
                 )
             }
         }
@@ -707,6 +798,40 @@ private fun AppsTab(
                 text = "Whitelist dışındaki uygulamalar varsayılan profili kullanır",
             )
         }
+    }
+}
+
+/**
+ * Fades + lifts content into place once, staggered by [index]. Runs only on
+ * the first composition of a list item, so scrolling never re-triggers it.
+ */
+@Composable
+private fun StaggeredAppear(
+    index: Int,
+    content: @Composable () -> Unit,
+) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(60L * index)
+        visible = true
+    }
+    val alpha by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = tween(300, easing = FastOutSlowInEasing),
+        label = "staggerAlpha",
+    )
+    val lift by animateDpAsState(
+        targetValue = if (visible) 0.dp else 18.dp,
+        animationSpec = tween(380, easing = FastOutSlowInEasing),
+        label = "staggerLift",
+    )
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(alpha)
+            .offset(y = lift),
+    ) {
+        content()
     }
 }
 
@@ -761,6 +886,18 @@ private fun TelemetryCard(
     val displayBits = status.a2dp.bitsPerSample.takeIf { it > 0 } ?: status.targetBits
     val codecLabel = if (status.a2dp.connected) status.a2dp.codecName.uppercase(Locale.getDefault()) else "—"
 
+    // Count the big readout up/down instead of hard-swapping the number.
+    val animatedRate by animateIntAsState(
+        targetValue = displayRate,
+        animationSpec = tween(650, easing = FastOutSlowInEasing),
+        label = "heroRate",
+    )
+    val animatedBits by animateIntAsState(
+        targetValue = displayBits,
+        animationSpec = tween(500, easing = FastOutSlowInEasing),
+        label = "heroBits",
+    )
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
@@ -803,7 +940,7 @@ private fun TelemetryCard(
                 verticalAlignment = Alignment.Bottom,
             ) {
                 Text(
-                    text = formatKhz(displayRate),
+                    text = formatKhz(animatedRate),
                     style = ArkNumericStyle.copy(
                         fontSize = 42.sp,
                         lineHeight = 44.sp,
@@ -817,12 +954,21 @@ private fun TelemetryCard(
                     modifier = Modifier.padding(start = 6.dp, bottom = 7.dp),
                 )
                 Spacer(Modifier.weight(1f))
-                CodecBadge(label = codecLabel, connected = status.a2dp.connected)
+                AnimatedContent(
+                    targetState = codecLabel to status.a2dp.connected,
+                    transitionSpec = {
+                        (fadeIn(tween(260)) + slideInVertically(tween(260)) { it / 3 }) togetherWith
+                            (fadeOut(tween(140)) + slideOutVertically(tween(140)) { -it / 3 })
+                    },
+                    label = "codecBadge",
+                ) { (label, connected) ->
+                    CodecBadge(label = label, connected = connected)
+                }
             }
 
             Spacer(Modifier.height(2.dp))
             Text(
-                text = "$displayBits-bit  ·  hedef ${formatKhz(status.targetRateHz)} kHz / ${status.targetBits}-bit",
+                text = "$animatedBits-bit  ·  hedef ${formatKhz(status.targetRateHz)} kHz / ${status.targetBits}-bit",
                 style = MaterialTheme.typography.bodyMedium,
                 color = c.textSecondary,
             )
@@ -883,6 +1029,12 @@ private fun TelemetryCard(
                 showDivider = false,
             )
 
+            RootStatusRow(
+                rootAvailable = status.rootAvailable,
+                writeSource = status.codecWriteSource,
+                lastApplySuccess = status.lastApplySuccess,
+            )
+
             val selectableRates = CodecCaps.rateMaskToHzList(status.a2dp.selectableRateMask)
             if (status.a2dp.connected && selectableRates.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
@@ -909,9 +1061,21 @@ private fun TelemetryCard(
                 }
             }
 
-            if (!status.lastError.isNullOrBlank()) {
-                Spacer(Modifier.height(12.dp))
-                DiagnosticBanner(message = status.lastError)
+            val diagnostic = status.lastError?.takeIf { it.isNotBlank() }
+            // Keep the last message while collapsing so the banner does not
+            // turn blank halfway through its exit animation.
+            var lastDiagnostic by remember { mutableStateOf("") }
+            LaunchedEffect(diagnostic) {
+                if (diagnostic != null) lastDiagnostic = diagnostic
+            }
+            AnimatedVisibility(
+                visible = diagnostic != null,
+                enter = fadeIn(tween(240)) + expandVertically(tween(280)),
+                exit = fadeOut(tween(160)) + shrinkVertically(tween(220)),
+            ) {
+                Box(modifier = Modifier.padding(top = 12.dp)) {
+                    DiagnosticBanner(message = lastDiagnostic)
+                }
             }
         }
     }
@@ -1013,6 +1177,79 @@ private fun TelemetryRow(
     }
     if (showDivider) {
         HorizontalDivider(color = c.border.copy(alpha = 0.7f))
+    }
+}
+
+@Composable
+private fun RootStatusRow(
+    rootAvailable: Boolean,
+    writeSource: String,
+    lastApplySuccess: Boolean?,
+) {
+    val c = LocalArkColors.current
+    val accent = if (rootAvailable) c.success else c.warning
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "KODEK YAZMA",
+                style = MaterialTheme.typography.labelSmall,
+                color = c.textTertiary,
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = if (rootAvailable) "Root köprüsü hazır" else "Root izni gerekli",
+                style = MaterialTheme.typography.titleMedium,
+                color = c.textPrimary,
+            )
+            Spacer(Modifier.height(1.dp))
+            Text(
+                text = when {
+                    writeSource == "root" && lastApplySuccess == true ->
+                        "Son yazma root üzerinden doğrulandı"
+                    writeSource == "root" -> "Root üzerinden yazma denendi"
+                    writeSource == "api" -> "Gizli API ile yazma denendi"
+                    !rootAvailable -> "Hz / bit derinliği yazmak için root erişimi verin"
+                    else -> "Kodek değişimi bekleniyor"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (rootAvailable) c.textSecondary else accent,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        if (rootAvailable) {
+            Box(
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(c.success.copy(alpha = 0.12f))
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+            ) {
+                Text(
+                    text = "ROOT",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = c.success,
+                )
+            }
+        } else {
+            Surface(
+                onClick = { DynamicBtServiceState.requestRootAccess() },
+                shape = CircleShape,
+                color = c.accent.copy(alpha = 0.14f),
+                border = BorderStroke(1.dp, c.accent.copy(alpha = 0.4f)),
+            ) {
+                Text(
+                    text = "İzin iste",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = c.accentSoft,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                )
+            }
+        }
     }
 }
 
@@ -1486,18 +1723,26 @@ private fun AppRow(
     entry: AppEntry,
     whitelisted: Boolean,
     onToggle: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val c = LocalArkColors.current
+    val containerColor by animateColorAsState(
+        targetValue = if (whitelisted) c.accentContainer.copy(alpha = 0.55f) else c.surfaceBg,
+        animationSpec = tween(220),
+        label = "appRowBg",
+    )
+    val borderColor by animateColorAsState(
+        targetValue = if (whitelisted) c.accent.copy(alpha = 0.45f) else c.border,
+        animationSpec = tween(220),
+        label = "appRowBorder",
+    )
 
     Surface(
         onClick = { onToggle(!whitelisted) },
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
-        color = if (whitelisted) c.accentContainer.copy(alpha = 0.55f) else c.surfaceBg,
-        border = BorderStroke(
-            1.dp,
-            if (whitelisted) c.accent.copy(alpha = 0.45f) else c.border,
-        ),
+        color = containerColor,
+        border = BorderStroke(1.dp, borderColor),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -1539,9 +1784,15 @@ private fun AppRow(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false),
                     )
-                    if (whitelisted) {
-                        Spacer(Modifier.width(6.dp))
-                        HiResBadge(text = "HI-RES")
+                    AnimatedVisibility(
+                        visible = whitelisted,
+                        enter = fadeIn(tween(200)),
+                        exit = fadeOut(tween(120)),
+                    ) {
+                        Row {
+                            Spacer(Modifier.width(6.dp))
+                            HiResBadge(text = "HI-RES")
+                        }
                     }
                 }
                 Spacer(Modifier.height(1.dp))

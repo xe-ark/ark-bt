@@ -100,6 +100,37 @@ class A2dpController(
         }
     }
 
+    /**
+     * Builds a snapshot from a root bridge read. This is the privileged path:
+     * it reports the real codec config that the hidden API is not allowed to
+     * read from an unprivileged app.
+     */
+    fun snapshotFromRoot(snapshot: RootCodecSnapshot): A2dpStateSnapshot {
+        if (snapshot.connected) {
+            lastError = null
+        }
+        return A2dpStateSnapshot(
+            connected = snapshot.connected,
+            deviceName = snapshot.deviceName,
+            deviceAddress = snapshot.deviceAddress,
+            codecType = if (snapshot.codecType >= 0) snapshot.codecType else CodecCaps.CODEC_SBC,
+            codecName = snapshot.codecName.ifBlank { CodecCaps.codecName(snapshot.codecType) },
+            sampleRateHz = snapshot.rateHz,
+            bitsPerSample = snapshot.bits,
+            selectableRateMask = snapshot.selectableRateMask,
+            selectableBitsMask = snapshot.selectableBitsMask,
+            lastError = lastError,
+        )
+    }
+
+    fun noteError(message: String?) {
+        lastError = message
+    }
+
+    fun clearError() {
+        lastError = null
+    }
+
     fun readState(allowRootFallback: Boolean = true): A2dpStateSnapshot {
         val proxy = a2dpProxy
         if (proxy != null) {

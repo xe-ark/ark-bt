@@ -13,16 +13,21 @@ android {
         applicationId = "com.emre.dynamicbt"
         minSdk = 27
         targetSdk = 37
-        versionCode = 100
-        versionName = "1.0"
+        versionCode = 101
+        versionName = "1.1"
     }
+
+    // CI provides a stable signing key through env vars so consecutive builds
+    // install over each other instead of failing with a signature mismatch.
+    def fallbackDebugKeystore = "${System.getProperty('user.home')}/.android/debug.keystore"
+    def envKeystorePath = System.getenv('ARK_KEYSTORE_PATH')
 
     signingConfigs {
         debugConfig {
-            storeFile = file("${System.getProperty('user.home')}/.android/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+            storeFile = file(envKeystorePath ?: fallbackDebugKeystore)
+            storePassword = System.getenv('ARK_KEYSTORE_PASSWORD') ?: 'android'
+            keyAlias = System.getenv('ARK_KEY_ALIAS') ?: 'androiddebugkey'
+            keyPassword = System.getenv('ARK_KEY_PASSWORD') ?: 'android'
         }
     }
 
@@ -58,6 +63,107 @@ android {
             excludes += '/META-INF/{AL2.0,LGPL2.1}'
         }
     }
+
+    sourceSets {
+        main {
+            // Populated by the codecBridgeDex task below.
+            assets.srcDir("${buildDir}/generated/codecBridgeAssets")
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Root codec bridge
+//
+// Android refuses codec reads/writes from unprivileged apps, so the bridge is
+// compiled to a tiny jar, packed as an asset, extracted at runtime and
+// executed with `app_process` under `su`.
+// ---------------------------------------------------------------------------
+def codecBridgeSource = rootProject.file('tools/CodecBridge.java')
+def codecBridgeClasses = layout.buildDirectory.dir('tmp/codecBridgeClasses')
+def codecBridgeAssets = layout.buildDirectory.dir('generated/codecBridgeAssets')
+
+tasks.register('codecBridgeDex') {
+    group = 'build'
+    description = 'Compiles tools/CodecBridge.java into codec-bridge.jar'
+
+    inputs.file(codecBridgeSource)
+    outputs.dir(codecBridgeAssets)
+
+    doLast {
+        def run = { List<String> cmd ->
+            def process = new ProcessBuilder(cmd).redirectErrorStream(true).start()
+            def output = process.inputStream.getText('UTF-8')
+            def code = process.waitFor()
+            if (code != 0) {
+                throw new GradleException("Command failed (${code}): ${cmd.join(' ')}\n${output}")
+            }
+            return output
+        }
+
+        def sdkDir = android.sdkDirectory
+        def androidJar = new File(sdkDir, "platforms/${android.compileSdkVersion}/android.jar")
+        def d8 = new File(sdkDir, "build-tools/${android.buildToolsVersion}/d8")
+        if (!androidJar.isFile()) {
+            throw new GradleException("android.jar not found: ${androidJar}")
+        }
+        if (!d8.isFile()) {
+            throw new GradleException("d8 not found: ${d8}")
+        }
+
+        def classesDir = codecBridgeClasses.get().asFile
+        def assetsDir = codecBridgeAssets.get().asFile
+        classesDir.deleteDir()
+        assetsDir.deleteDir()
+        classesDir.mkdirs()
+        assetsDir.mkdirs()
+
+        run([
+            'javac',
+            '-encoding', 'UTF-8',
+            '-source', '17',
+            '-target', '17',
+            '-classpath', androidJar.absolutePath,
+            '-d', classesDir.absolutePath,
+            codecBridgeSource.absolutePath,
+        ])
+
+        def classFiles = fileTree(classesDir).matching { include '**/*.class' }.files
+            .collect { it.absolutePath }
+        if (classFiles.isEmpty()) {
+            throw new GradleException('codecBridgeDex produced no class files')
+        }
+
+        run([
+            d8.absolutePath,
+            '--min-api', '27',
+            '--lib', androidJar.absolutePath,
+            '--output', assetsDir.absolutePath,
+        ] + classFiles)
+
+        def produced = new File(assetsDir, 'classes.dex')
+        if (!produced.isFile()) {
+            throw new GradleException('d8 did not produce classes.dex')
+        }
+
+        // Ship a jar rather than a bare dex: `app_process` classpaths are the
+        // most predictable with a zip container, and it keeps the asset from
+        // being mistaken for an installable dex.
+        def jarFile = new File(assetsDir, 'codec-bridge.jar')
+        new java.util.zip.ZipOutputStream(new FileOutputStream(jarFile)).withCloseable { zip ->
+            zip.putNextEntry(new java.util.zip.ZipEntry('classes.dex'))
+            zip.write(produced.bytes)
+            zip.closeEntry()
+        }
+        if (!produced.delete()) {
+            logger.warn('Could not delete intermediate classes.dex')
+        }
+    }
+}
+
+preBuild.dependsOn tasks.named('codecBridgeDex')
+tasks.matching { it.name.startsWith('merge') && it.name.endsWith('Assets') }.configureEach {
+    dependsOn tasks.named('codecBridgeDex')
 }
 
 dependencies {

@@ -4,10 +4,12 @@ import android.content.Context
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioPlaybackConfiguration
+import android.os.SystemClock
 import android.util.Log
 import com.emre.dynamicbt.policy.ActiveTrackInfo
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 data class ProbedTrack(
     val uid: Int,
@@ -329,24 +331,113 @@ object TrackFormatProbe {
         null
     }
 
-    internal fun readDumpsys(service: String, allowRootFallback: Boolean): String {
-        val direct = execCommand(arrayOf("dumpsys", service))
-        if (direct.isNotBlank()) return direct
-        if (!allowRootFallback) return ""
-        return execCommand(arrayOf("su", "0", "dumpsys", service))
+    // --- dumpsys plumbing -------------------------------------------------
+
+    private data class CachedDump(val atMs: Long, val text: String)
+
+    private const val DUMP_TTL_MS = 2_500L
+    private const val DUMP_TIMEOUT_SECONDS = 8L
+    private const val DUMP_MAX_CHARS = 1_500_000
+
+    private val dumpCache = ConcurrentHashMap<String, CachedDump>()
+
+    /**
+     * Reads a dumpsys service.
+     *
+     * An unprivileged app calling `dumpsys` gets a "Permission Denial" body
+     * while the process still exits with code 0, which used to be treated as a
+     * valid dump and silently disabled every downstream codec check. We now
+     * detect that marker and retry through root. Results are cached briefly
+     * because spawning `dumpsys` (or `su`) every second is what caused the
+     * scroll stutter.
+     */
+    internal fun readDumpsys(
+        service: String,
+        allowRootFallback: Boolean,
+        bypassCache: Boolean = false,
+    ): String {
+        val now = SystemClock.elapsedRealtime()
+        if (!bypassCache) {
+            dumpCache[service]?.let {
+                if (now - it.atMs <= DUMP_TTL_MS) return it.text
+            }
+        }
+
+        val direct = execCommand(arrayOf(DUMPSYS_BIN, service))
+        val text = when {
+            direct.isBlank() -> {
+                if (allowRootFallback) rootDumpsys(service) else ""
+            }
+            isPermissionDenied(direct) -> {
+                if (allowRootFallback) rootDumpsys(service) else ""
+            }
+            else -> direct
+        }
+
+        dumpCache[service] = CachedDump(now, text)
+        return text
     }
 
+    /** Invalidates the cache so the next read reflects a just-applied codec. */
+    fun invalidateDumpCache(service: String? = null) {
+        if (service == null) dumpCache.clear() else dumpCache.remove(service)
+    }
+
+    private fun rootDumpsys(service: String): String {
+        val rooted = execCommand(arrayOf("su", "-c", "$DUMPSYS_BIN $service"))
+        return if (isPermissionDenied(rooted)) "" else rooted
+    }
+
+    private fun isPermissionDenied(text: String): Boolean {
+        if (text.isBlank()) return false
+        val head = text.take(4_096)
+        return head.contains("Permission Denial") ||
+            head.contains("Permission denial") ||
+            head.contains("Security exception") ||
+            head.contains("does not have android.permission.DUMP") ||
+            (head.contains("android.permission.DUMP") && head.contains("required"))
+    }
+
+    /**
+     * Runs a command with a hard timeout.
+     *
+     * Output is redirected to a temp file instead of a pipe: reading a pipe
+     * blocks until the child closes it, which would make the timeout useless
+     * for a `su` call sitting on a permission prompt.
+     */
     private fun execCommand(cmd: Array<String>): String {
+        var proc: Process? = null
+        var outFile: File? = null
         return try {
-            val proc = ProcessBuilder(*cmd)
-                .redirectErrorStream(false)
+            outFile = File.createTempFile("ark-dumpsys", ".txt")
+            proc = ProcessBuilder(*cmd)
+                .redirectErrorStream(true)
+                .redirectOutput(outFile)
                 .start()
-            val output = proc.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-            proc.waitFor()
-            if (proc.exitValue() == 0) output else ""
+            if (!proc.waitFor(DUMP_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                proc.destroyForcibly()
+                Log.d(TAG, "Command timed out: ${cmd.joinToString(" ")}")
+                ""
+            } else if (proc.exitValue() != 0 && outFile.length() == 0L) {
+                ""
+            } else {
+                val text = outFile.readText(Charsets.UTF_8)
+                if (text.length > DUMP_MAX_CHARS) text.substring(0, DUMP_MAX_CHARS) else text
+            }
         } catch (e: Exception) {
             Log.d(TAG, "Command failed (${cmd.joinToString(" ")}): ${e.message}")
             ""
+        } finally {
+            try {
+                proc?.destroy()
+            } catch (_: Exception) {
+            }
+            try {
+                outFile?.delete()
+            } catch (_: Exception) {
+            }
         }
     }
+
+    private const val DUMPSYS_BIN = "/system/bin/dumpsys"
 }

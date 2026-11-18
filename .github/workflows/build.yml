@@ -5,6 +5,11 @@ on:
     branches: [ main, master ]
   pull_request:
   workflow_dispatch:
+    inputs:
+      rotate_keystore:
+        description: 'Generate a new signing keystore and upload it as an artifact'
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -47,14 +52,47 @@ jobs:
           "$SM" --list | grep -E "platforms;android-3[5-9]|build-tools;3[5-9]" | sort -u | head -40 || true
           "$SM" --install "platform-tools" "platforms;android-37.0" "build-tools;37.0.0"
 
-      - name: Create debug keystore
+      # A stable key means later builds can be installed over the previous APK.
+      # Priority: repo secret -> freshly generated (rotate) -> throwaway debug key.
+      - name: Configure signing key
+        env:
+          ARK_KEYSTORE_BASE64: ${{ secrets.ARK_KEYSTORE_BASE64 }}
         run: |
-          mkdir -p "$HOME/.android"
-          keytool -genkeypair -v \
-            -keystore "$HOME/.android/debug.keystore" \
-            -storepass android -keypass android \
-            -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
+          set -euo pipefail
+          KEYSTORE="$RUNNER_TEMP/ark-bt.jks"
+          if [ -n "${ARK_KEYSTORE_BASE64:-}" ]; then
+            echo "Using keystore from repository secrets"
+            printf '%s' "$ARK_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE"
+          elif [ "${{ github.event.inputs.rotate_keystore }}" = "true" ]; then
+            echo "Generating a fresh keystore"
+            keytool -genkeypair -v \
+              -keystore "$KEYSTORE" \
+              -storepass arkbtpass -keypass arkbtpass \
+              -alias arkbt -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Ark Bt,O=Xe.Ark,C=TR"
+            echo "ARK_KEYSTORE_ARTIFACT=true" >> "$GITHUB_ENV"
+          else
+            echo "No keystore secret configured; using an ephemeral debug key"
+            mkdir -p "$HOME/.android"
+            keytool -genkeypair -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android -keypass android \
+              -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+            exit 0
+          fi
+          echo "ARK_KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
+          echo "ARK_KEYSTORE_PASSWORD=arkbtpass" >> "$GITHUB_ENV"
+          echo "ARK_KEY_ALIAS=arkbt" >> "$GITHUB_ENV"
+          echo "ARK_KEY_PASSWORD=arkbtpass" >> "$GITHUB_ENV"
+
+      - name: Upload generated keystore
+        if: ${{ env.ARK_KEYSTORE_ARTIFACT == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ark-bt-keystore
+          path: ${{ runner.temp }}/ark-bt.jks
+          if-no-files-found: error
 
       - name: Build debug APK
         run: ./gradlew assembleDebug --stacktrace

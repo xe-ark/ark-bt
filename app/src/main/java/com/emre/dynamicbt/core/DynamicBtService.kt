@@ -12,8 +12,10 @@ import android.os.IBinder
 import android.os.SystemClock
 import android.util.Log
 import com.emre.dynamicbt.audio.PlaybackMonitor
+import com.emre.dynamicbt.audio.TrackFormatProbe
 import com.emre.dynamicbt.bt.A2dpController
 import com.emre.dynamicbt.bt.A2dpStateSnapshot
+import com.emre.dynamicbt.bt.RootCodec
 import com.emre.dynamicbt.bt.UsbAudioState
 import com.emre.dynamicbt.bt.UsbController
 import com.emre.dynamicbt.policy.PolicyConfig
@@ -52,6 +54,8 @@ data class ServiceStatus(
     val lastApplyMs: Long = 0L,
     val lastApplySuccess: Boolean? = null,
     val lastError: String? = null,
+    val rootAvailable: Boolean = false,
+    val codecWriteSource: String = "none",
     val updatedAtMs: Long = 0L,
 )
 
@@ -125,6 +129,22 @@ object DynamicBtServiceState {
         activeService?.onStoreChanged()
     }
 
+    /**
+     * Kicks off the KernelSU/Magisk permission prompt. `su` blocks until the
+     * user answers, so this must never run on the main thread.
+     */
+    fun requestRootAccess() {
+        val ctx = appContext ?: return
+        val service = activeService
+        Thread({
+            val granted = RootCodec.rootAvailable(ctx, force = true)
+            if (granted) {
+                TrackFormatProbe.invalidateDumpCache()
+                service?.onStoreChanged()
+            }
+        }, "ArkRootRequest").apply { isDaemon = true }.start()
+    }
+
     fun updateWhitelist(packages: Set<String>) {
         val ctx = appContext ?: return
         WhitelistStore.saveWhitelist(ctx, packages)
@@ -137,7 +157,7 @@ object DynamicBtServiceState {
 class DynamicBtService : Service() {
     companion object {
         private const val TAG = "DynamicBtService"
-        private const val TICK_INTERVAL_MS = 1000L
+        private const val TICK_INTERVAL_MS = 1200L
         private const val STATUS_FILE_NAME = "status.json"
         private const val CHANNEL_ID = "dynamic_bt_bg"
         private const val NOTIFICATION_ID = 1001
@@ -161,6 +181,7 @@ class DynamicBtService : Service() {
     private var lastFailedApplyMs = 0L
     private var lastApplyWallMs = 0L
     private var lastApplySuccess: Boolean? = null
+    private var lastWriteSource = "none"
     private var lastWrittenSignature: String? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -281,9 +302,21 @@ class DynamicBtService : Service() {
         val wl = currentWhitelist
         val nowMonoMs = SystemClock.elapsedRealtime()
 
-        val tracks = playbackMonitor.queryActiveTracks(allowRootFallback = true)
+        // Root is the only path that can read or write the A2DP codec config
+        // (BLUETOOTH_PRIVILEGED is not grantable to third-party apps).
+        val rootReady = RootCodec.rootAvailable(this)
+        val rootSnapshot = if (rootReady) RootCodec.read(this) else null
+
+        val tracks = playbackMonitor.queryActiveTracks(allowRootFallback = rootReady)
         val outBtA2dp = playbackMonitor.isBluetoothA2dpOutputActive()
-        val a2dp = a2dpController.readState(allowRootFallback = true)
+        val a2dp = when {
+            rootSnapshot == null -> a2dpController.readState(allowRootFallback = rootReady)
+            // Root answered but no sink is active: trust it, instead of
+            // falling back to an app-level read that would just fail.
+            !rootSnapshot.connected -> a2dpController.snapshotFromRoot(rootSnapshot)
+            rootSnapshot.ok -> a2dpController.snapshotFromRoot(rootSnapshot)
+            else -> a2dpController.readState(allowRootFallback = rootReady)
+        }
         val usb = usbController.readState()
 
         val decision = ratePolicy.evaluate(
@@ -295,23 +328,51 @@ class DynamicBtService : Service() {
             outputIsBtA2dp = outBtA2dp,
         )
 
+        var postApplyA2dp: A2dpStateSnapshot? = null
+
         val failCooldownReady = !hasFailedApply ||
             (nowMonoMs - lastFailedApplyMs >= cfg.applyCooldownMs)
         if (decision.shouldApply && failCooldownReady) {
-            val ok = a2dpController.applyCodecConfig(decision.targetRateHz, decision.targetBits)
+            val rootResult = if (rootReady) {
+                RootCodec.apply(this, decision.targetRateHz, decision.targetBits)
+            } else {
+                null
+            }
+
+            val ok = when {
+                rootResult != null -> {
+                    lastWriteSource = "root"
+                    if (rootResult.ok && rootResult.applied) {
+                        postApplyA2dp = a2dpController.snapshotFromRoot(rootResult)
+                        true
+                    } else {
+                        a2dpController.noteError(
+                            rootResult.error ?: "Köprü kodek yazımını doğrulayamadı",
+                        )
+                        false
+                    }
+                }
+
+                else -> {
+                    lastWriteSource = "api"
+                    a2dpController.applyCodecConfig(decision.targetRateHz, decision.targetBits)
+                }
+            }
+
             lastApplyWallMs = System.currentTimeMillis()
             lastApplySuccess = ok
             if (ok) {
                 hasFailedApply = false
                 ratePolicy.markApplied(nowMonoMs)
+                TrackFormatProbe.invalidateDumpCache("bluetooth_manager")
             } else {
                 hasFailedApply = true
                 lastFailedApplyMs = nowMonoMs
             }
         }
 
-        val updatedA2dp = if (decision.shouldApply) {
-            a2dpController.readState(allowRootFallback = true)
+        val updatedA2dp = postApplyA2dp ?: if (decision.shouldApply) {
+            a2dpController.readState(allowRootFallback = rootReady)
         } else {
             a2dp
         }
@@ -333,7 +394,10 @@ class DynamicBtService : Service() {
             whitelist = wl,
             lastApplyMs = lastApplyWallMs,
             lastApplySuccess = lastApplySuccess,
-            lastError = updatedA2dp.lastError,
+            lastError = updatedA2dp.lastError
+                ?: RootCodec.lastError()?.takeIf { it != "root_unavailable" },
+            rootAvailable = rootReady,
+            codecWriteSource = lastWriteSource,
             updatedAtMs = System.currentTimeMillis(),
         )
         publishStatusIfChanged(status)
@@ -358,6 +422,8 @@ class DynamicBtService : Service() {
             status.lastApplyMs,
             status.lastApplySuccess,
             status.lastError,
+            status.rootAvailable,
+            status.codecWriteSource,
         ).joinToString("|")
 
         if (signature == lastWrittenSignature) return
@@ -388,6 +454,8 @@ class DynamicBtService : Service() {
             put("last_apply_ms", status.lastApplyMs)
             put("last_apply_success", status.lastApplySuccess ?: JSONObject.NULL)
             put("last_error", status.lastError ?: JSONObject.NULL)
+            put("root_available", status.rootAvailable)
+            put("codec_write_source", status.codecWriteSource)
             put("now_ms", status.updatedAtMs)
         }.toString()
 
