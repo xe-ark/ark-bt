@@ -1,0 +1,75 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Soft Crimson Crest Inner Fill -->
+    <path
+        android:fillAlpha="0.16"
+        android:fillColor="#FF2A4B"
+        android:pathData="M54,24 L77,33.5 L77,55.5 C77,69 67,78.5 54,83.5 C41,78.5 31,69 31,55.5 L31,33.5 Z" />
+
+    <!-- Outer Xe.Ark Faceted Shield Crest (Crimson-to-Scarlet Gradient) -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M54,24 L77,33.5 L77,55.5 C77,69 67,78.5 54,83.5 C41,78.5 31,69 31,55.5 L31,33.5 Z"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="4.6">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:endX="77"
+                android:endY="83.5"
+                android:startX="31"
+                android:startY="24"
+                android:type="linear">
+                <item android:color="#FF2A4B" android:offset="0.0" />
+                <item android:color="#E11D48" android:offset="0.52" />
+                <item android:color="#7F1D1D" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Inner Geometric Ark Monolith Arch (Titanium White) -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M43,62 L43,50 A11,11 0 0,1 65,50 L65,62"
+        android:strokeColor="#F8FAFC"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="4.0" />
+
+    <!-- Sharp Crimson X / Acoustic Pulse Crossbar -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M38.5,56 L47,56 L50.8,51.2 L54,59.2 L57.2,51.2 L61,56 L69.5,56"
+        android:strokeColor="#FF3355"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2.8" />
+
+    <!-- Central Glowing Crimson Core -->
+    <path
+        android:fillAlpha="0.30"
+        android:fillColor="#FF1E42"
+        android:pathData="M54,41.6 A5.2,5.2 0 1,1 53.99,41.6 Z" />
+    <path
+        android:fillColor="#FF1E42"
+        android:pathData="M54,43.6 A3.2,3.2 0 1,1 53.99,43.6 Z" />
+
+    <!-- Dual Hi-Res Acoustic Wave Arcs at Base -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M45.5,67.5 Q54,73.5 62.5,67.5"
+        android:strokeColor="#FF6B81"
+        android:strokeLineCap="round"
+        android:strokeWidth="2.8" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M49.2,72.6 Q54,76.4 58.8,72.6"
+        android:strokeColor="#FF2E4C"
+        android:strokeLineCap="round"
+        android:strokeWidth="2.2" />
+</vector>

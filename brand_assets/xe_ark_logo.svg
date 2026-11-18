@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- Obsidian-Carbon Radial Backdrop -->
+    <radialGradient id="bgGrad" cx="50%" cy="44%" r="70%">
+      <stop offset="0%" stop-color="#22060C"/>
+      <stop offset="52%" stop-color="#0C0508"/>
+      <stop offset="100%" stop-color="#040406"/>
+    </radialGradient>
+
+    <!-- Crimson Ambient Glow -->
+    <radialGradient id="coreGlow" cx="50%" cy="46%" r="36%">
+      <stop offset="0%" stop-color="#FF1E42" stop-opacity="0.34"/>
+      <stop offset="55%" stop-color="#991B1B" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#040406" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Shield Border Linear Gradient -->
+    <linearGradient id="shieldGrad" x1="25%" y1="15%" x2="75%" y2="85%">
+      <stop offset="0%" stop-color="#FF3B5C"/>
+      <stop offset="48%" stop-color="#E11D48"/>
+      <stop offset="100%" stop-color="#7F1D1D"/>
+    </linearGradient>
+
+    <!-- Inner Shield Fill -->
+    <linearGradient id="shieldFill" x1="50%" y1="18%" x2="50%" y2="84%">
+      <stop offset="0%" stop-color="#FF2A4B" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#450A0A" stop-opacity="0.06"/>
+    </linearGradient>
+
+    <!-- Crimson Pulse Gradient -->
+    <linearGradient id="pulseGrad" x1="0%" y1="50%" x2="100%" y2="50%">
+      <stop offset="0%" stop-color="#991B1B"/>
+      <stop offset="50%" stop-color="#FF2E4C"/>
+      <stop offset="100%" stop-color="#FF6B81"/>
+    </linearGradient>
+
+    <filter id="softGlow" filterUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Rounded Squircle Container -->
+  <rect width="1024" height="1024" rx="228" fill="url(#bgGrad)"/>
+
+  <!-- Ambient Crimson Core Glow -->
+  <circle cx="512" cy="460" r="380" fill="url(#coreGlow)"/>
+
+  <!-- Subtle Xe Precision X-Grid -->
+  <g stroke="#991B1B" stroke-opacity="0.18" stroke-width="6" stroke-linecap="round">
+    <line x1="150" y1="150" x2="874" y2="874"/>
+    <line x1="874" y1="150" x2="150" y2="874"/>
+  </g>
+
+  <!-- Outer Orbital Rings -->
+  <circle cx="512" cy="480" r="388" fill="none" stroke="#EF4444" stroke-opacity="0.20" stroke-width="4" stroke-dasharray="18 14"/>
+  <circle cx="512" cy="480" r="326" fill="none" stroke="#991B1B" stroke-opacity="0.18" stroke-width="3"/>
+
+  <!-- Outer Xe.Ark Faceted Shield Crest -->
+  <path d="M512 182 L754 280 L754 510 C754 652 652 754 512 806 C372 754 270 652 270 510 L270 280 Z"
+        fill="url(#shieldFill)"
+        stroke="url(#shieldGrad)"
+        stroke-width="34"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        filter="url(#softGlow)"/>
+
+  <!-- Inner Subtle Bevel Shield -->
+  <path d="M512 214 L724 300 L724 508 C724 630 634 720 512 768 C390 720 300 630 300 508 L300 300 Z"
+        fill="none"
+        stroke="#FFFFFF"
+        stroke-opacity="0.08"
+        stroke-width="4"/>
+
+  <!-- Inner Geometric Ark Monolith Arch (Titanium White) -->
+  <path d="M396 588 L396 462 A116 116 0 0 1 628 462 L628 588"
+        fill="none"
+        stroke="#F8FAFC"
+        stroke-width="36"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+
+  <!-- Sharp Crimson X / Acoustic Pulse Crossbar -->
+  <path d="M336 520 L438 520 L478 468 L512 560 L546 468 L586 520 L688 520"
+        fill="none"
+        stroke="url(#pulseGrad)"
+        stroke-width="24"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        filter="url(#softGlow)"/>
+
+  <!-- Central Glowing Crimson Core -->
+  <circle cx="512" cy="426" r="46" fill="#FF1E42" fill-opacity="0.28"/>
+  <circle cx="512" cy="426" r="28" fill="#FF1E42" filter="url(#softGlow)"/>
+  <circle cx="504" cy="418" r="8" fill="#FF9AA8" fill-opacity="0.8"/>
+
+  <!-- Dual Hi-Res Acoustic Wave Arcs -->
+  <path d="M422 642 Q512 706 602 642"
+        fill="none"
+        stroke="#FF6B81"
+        stroke-width="24"
+        stroke-linecap="round"/>
+  <path d="M462 696 Q512 736 562 696"
+        fill="none"
+        stroke="#FF2E4C"
+        stroke-width="18"
+        stroke-linecap="round"/>
+
+  <!-- Subtle Wordmark Pill at Bottom -->
+  <text x="512" y="922"
+        text-anchor="middle"
+        font-family="sans-serif"
+        font-weight="800"
+        font-size="64"
+        letter-spacing="12"
+        fill="#F8FAFC">XE<tspan fill="#FF2E4C">.</tspan>ARK</text>
+</svg>
