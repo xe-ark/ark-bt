@@ -146,7 +146,55 @@ public final class CodecBridge {
             sb.append("\"adapter\":").append(adapter != null).append(',');
             sb.append("\"state\":").append(adapter != null
                     ? String.valueOf(call(adapter, "getState", new Class<?>[]{}))
-                    : "null");
+                    : "null").append(',');
+
+            StringBuilder ctors = new StringBuilder();
+            for (java.lang.reflect.Constructor<?> ctor : adapterClass.getDeclaredConstructors()) {
+                if (ctors.length() > 0) {
+                    ctors.append('|');
+                }
+                for (Class<?> p : ctor.getParameterTypes()) {
+                    ctors.append(p.getSimpleName()).append(',');
+                }
+            }
+            sb.append("\"ctors\":\"").append(escape(ctors.toString())).append("\",");
+
+            try {
+                Class<?> bsm = Class.forName("android.bluetooth.BluetoothServiceManager");
+                sb.append("\"bsmClass\":true,");
+                StringBuilder methods = new StringBuilder();
+                for (Method m : bsm.getDeclaredMethods()) {
+                    if (methods.length() > 0) {
+                        methods.append('|');
+                    }
+                    methods.append(m.getName());
+                }
+                sb.append("\"bsmMethods\":\"").append(escape(methods.toString())).append("\",");
+            } catch (Throwable ignored) {
+                sb.append("\"bsmClass\":false,");
+            }
+
+            // Try to build an adapter directly from the binder.
+            try {
+                Class<?> stub = Class.forName("android.bluetooth.IBluetoothManager$Stub");
+                Method asInterface = stub.getMethod("asInterface", android.os.IBinder.class);
+                Object manager = asInterface.invoke(null, binder);
+                Object direct = null;
+                for (java.lang.reflect.Constructor<?> ctor : adapterClass.getDeclaredConstructors()) {
+                    Class<?>[] types = ctor.getParameterTypes();
+                    if (types.length == 1 && types[0].isInstance(manager)) {
+                        ctor.setAccessible(true);
+                        direct = ctor.newInstance(manager);
+                        break;
+                    }
+                }
+                sb.append("\"directAdapter\":").append(direct != null).append(',');
+                sb.append("\"directState\":").append(direct != null
+                        ? String.valueOf(call(direct, "getState", new Class<?>[]{}))
+                        : "null");
+            } catch (Throwable t) {
+                sb.append("\"directError\":\"").append(escape(describe(t))).append("\"");
+            }
         } catch (Throwable t) {
             sb.append("\"error\":\"").append(escape(describe(t))).append("\",");
             sb.append("\"adapter\":false");
