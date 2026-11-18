@@ -45,7 +45,7 @@ jobs:
           yes | "$SM" --licenses > /dev/null 2>&1 || true
           echo "--- available platform/build-tools packages ---"
           "$SM" --list | grep -E "platforms;android-3[5-9]|build-tools;3[5-9]" | sort -u | head -40 || true
-          "$SM" --install "platform-tools" "platforms;android-37" "build-tools;37.0.0"
+          "$SM" --install "platform-tools" "platforms;android-37.0" "build-tools;37.0.0"
 
       - name: Create debug keystore
         run: |
