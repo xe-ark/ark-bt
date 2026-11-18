@@ -459,6 +459,25 @@ public final class CodecBridge {
         if (sFrameworkInitialized) {
             return;
         }
+
+        // Preferred: run the real framework bootstrap. It knows exactly where
+        // the registerer belongs, including future layout changes.
+        try {
+            Class<?> registry = Class.forName("android.app.SystemServiceRegistry");
+            Method register = registry.getDeclaredMethod("registerServiceWrappers");
+            register.setAccessible(true);
+            register.invoke(null);
+            Class<?> bsm = Class.forName("android.os.BluetoothServiceManager");
+            if (haveServiceRegisterer(bsm)) {
+                sFrameworkInitialized = true;
+                System.err.println("SystemServiceRegistry.registerServiceWrappers() ok");
+                return;
+            }
+            System.err.println("registerServiceWrappers ran, registerer still null");
+        } catch (Throwable t) {
+            System.err.println("SystemServiceRegistry bootstrap failed: " + describe(t));
+        }
+
         try {
             Class<?> bsm = Class.forName("android.os.BluetoothServiceManager");
             if (haveServiceRegisterer(bsm)) {
@@ -474,6 +493,7 @@ public final class CodecBridge {
                 return;
             }
 
+            int installed = 0;
             for (java.lang.reflect.Field field : bsm.getDeclaredFields()) {
                 if (!field.getType().isAssignableFrom(registererClass)) {
                     continue;
@@ -481,6 +501,7 @@ public final class CodecBridge {
                 field.setAccessible(true);
                 if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
                     field.set(null, registerer);
+                    installed++;
                 }
             }
 
@@ -488,7 +509,8 @@ public final class CodecBridge {
                 sFrameworkInitialized = true;
                 System.err.println("installed bluetooth_manager ServiceRegisterer");
             } else {
-                System.err.println("ServiceRegisterer installed but getter still null");
+                System.err.println("ServiceRegisterer fields patched=" + installed
+                        + " but getter still null");
             }
         } catch (Throwable t) {
             System.err.println("bluetooth registerer install failed: " + describe(t));
