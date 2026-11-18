@@ -55,7 +55,7 @@ public final class CodecBridge {
             final Context ctx = systemContext();
             final BluetoothManager manager =
                     (BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE);
-            final BluetoothAdapter adapter = manager != null ? manager.getAdapter() : null;
+            final BluetoothAdapter adapter = resolveAdapter(ctx, manager);
             if (adapter == null) {
                 print(error("no_bluetooth_adapter"));
                 return;
@@ -175,26 +175,14 @@ public final class CodecBridge {
             }
 
             // Try to build an adapter directly from the binder.
-            try {
-                Class<?> stub = Class.forName("android.bluetooth.IBluetoothManager$Stub");
-                Method asInterface = stub.getMethod("asInterface", android.os.IBinder.class);
-                Object manager = asInterface.invoke(null, binder);
-                Object direct = null;
-                for (java.lang.reflect.Constructor<?> ctor : adapterClass.getDeclaredConstructors()) {
-                    Class<?>[] types = ctor.getParameterTypes();
-                    if (types.length == 1 && types[0].isInstance(manager)) {
-                        ctor.setAccessible(true);
-                        direct = ctor.newInstance(manager);
-                        break;
-                    }
-                }
-                sb.append("\"directAdapter\":").append(direct != null).append(',');
-                sb.append("\"directState\":").append(direct != null
-                        ? String.valueOf(call(direct, "getState", new Class<?>[]{}))
-                        : "null");
-            } catch (Throwable t) {
-                sb.append("\"directError\":\"").append(escape(describe(t))).append("\"");
-            }
+            Context probeContext = systemContext();
+            BluetoothManager probeManager =
+                    (BluetoothManager) probeContext.getSystemService(Context.BLUETOOTH_SERVICE);
+            BluetoothAdapter direct = resolveAdapter(probeContext, probeManager);
+            sb.append("\"directAdapter\":").append(direct != null).append(',');
+            sb.append("\"directState\":").append(direct != null
+                    ? String.valueOf(call(direct, "getState", new Class<?>[]{}))
+                    : "null");
         } catch (Throwable t) {
             sb.append("\"error\":\"").append(escape(describe(t))).append("\",");
             sb.append("\"adapter\":false");
@@ -358,6 +346,61 @@ public final class CodecBridge {
             throw new IllegalStateException("builder returned null");
         }
         return config;
+    }
+
+    /**
+     * Resolves the Bluetooth adapter.
+     *
+     * On some OEM builds (seen on HyperOS/Android 17) the framework's
+     * {@code BluetoothAdapter.getDefaultAdapter()} refuses to hand an adapter
+     * to a non-app process even when the binder itself is present. Building
+     * the adapter from the raw IBluetoothManager binder works in that case.
+     */
+    private static BluetoothAdapter resolveAdapter(Context context, BluetoothManager manager) {
+        if (manager != null) {
+            try {
+                BluetoothAdapter adapter = manager.getAdapter();
+                if (adapter != null) {
+                    return adapter;
+                }
+            } catch (Throwable t) {
+                System.err.println("manager.getAdapter failed: " + describe(t));
+            }
+        }
+
+        try {
+            Object binder = serviceBinder("bluetooth_manager");
+            if (binder == null) {
+                System.err.println("bluetooth_manager binder is null");
+                return null;
+            }
+            Class<?> stub = Class.forName("android.bluetooth.IBluetoothManager$Stub");
+            Method asInterface = stub.getMethod("asInterface", android.os.IBinder.class);
+            Object service = asInterface.invoke(null, binder);
+            for (java.lang.reflect.Constructor<?> ctor
+                    : BluetoothAdapter.class.getDeclaredConstructors()) {
+                Class<?>[] types = ctor.getParameterTypes();
+                if (types.length == 2
+                        && types[0].isInstance(service)
+                        && types[1].isInstance(context)) {
+                    ctor.setAccessible(true);
+                    BluetoothAdapter adapter = (BluetoothAdapter) ctor.newInstance(service, context);
+                    System.err.println("built BluetoothAdapter from binder");
+                    return adapter;
+                }
+            }
+            System.err.println("no usable BluetoothAdapter constructor");
+        } catch (Throwable t) {
+            System.err.println("direct adapter build failed: " + describe(t));
+        }
+        return null;
+    }
+
+    private static Object serviceBinder(String name) throws Exception {
+        Class<?> serviceManager = Class.forName("android.os.ServiceManager");
+        Method getService = serviceManager.getDeclaredMethod("getService", String.class);
+        getService.setAccessible(true);
+        return getService.invoke(null, name);
     }
 
     private static Object activeDevice(BluetoothProfile proxy) {
