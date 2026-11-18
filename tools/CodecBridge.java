@@ -167,7 +167,7 @@ public final class CodecBridge {
             sb.append("\"ctors\":\"").append(escape(ctors.toString())).append("\",");
 
             try {
-                Class<?> bsm = Class.forName("android.bluetooth.BluetoothServiceManager");
+                Class<?> bsm = Class.forName("android.os.BluetoothServiceManager");
                 sb.append("\"bsmClass\":true,");
                 StringBuilder methods = new StringBuilder();
                 for (Method m : bsm.getDeclaredMethods()) {
@@ -177,6 +177,25 @@ public final class CodecBridge {
                     methods.append(m.getName());
                 }
                 sb.append("\"bsmMethods\":\"").append(escape(methods.toString())).append("\",");
+                StringBuilder fields = new StringBuilder();
+                for (java.lang.reflect.Field f : bsm.getDeclaredFields()) {
+                    if (fields.length() > 0) {
+                        fields.append('|');
+                    }
+                    fields.append(f.getName()).append(':').append(f.getType().getSimpleName());
+                }
+                sb.append("\"bsmFields\":\"").append(escape(fields.toString())).append("\",");
+                Class<?> reg = Class.forName("android.os.BluetoothServiceManager$ServiceRegisterer");
+                StringBuilder regCtors = new StringBuilder();
+                for (java.lang.reflect.Constructor<?> ctor : reg.getDeclaredConstructors()) {
+                    if (regCtors.length() > 0) {
+                        regCtors.append('|');
+                    }
+                    for (Class<?> p : ctor.getParameterTypes()) {
+                        regCtors.append(p.getSimpleName()).append(',');
+                    }
+                }
+                sb.append("\"regCtors\":\"").append(escape(regCtors.toString())).append("\",");
             } catch (Throwable ignored) {
                 sb.append("\"bsmClass\":false,");
             }
@@ -428,50 +447,79 @@ public final class CodecBridge {
     }
 
     /**
-     * Initializes the Bluetooth framework module wrappers.
+     * Installs the Bluetooth service registerer.
      *
      * `app_process` starts a bare runtime without the `SystemServiceRegistry`
-     * bootstrap, so `android.os.BluetoothServiceManager` has no service
-     * registerer and every profile call throws a NullPointerException. Calling
-     * the module initializer by hand restores normal behavior.
-     *
-     * `SystemServiceRegistry` refuses module registration unless it is inside
-     * its own initialization, so that guard flag is raised around the call.
+     * bootstrap, so `android.os.BluetoothServiceManager` has no registerer and
+     * every profile call dies with a NullPointerException. Registering the
+     * "bluetooth_manager" binder directly is more reliable than replaying the
+     * module bootstrap, which refuses to run outside class initialization.
      */
     private static synchronized void ensureBluetoothFrameworkInitialized() {
         if (sFrameworkInitialized) {
             return;
         }
-
-        java.lang.reflect.Field initializing = null;
-        boolean previous = false;
         try {
-            Class<?> registry = Class.forName("android.app.SystemServiceRegistry");
-            initializing = registry.getDeclaredField("mIsInitializing");
-            initializing.setAccessible(true);
-            previous = initializing.getBoolean(null);
-            initializing.setBoolean(null, true);
-        } catch (Throwable t) {
-            System.err.println("could not raise SystemServiceRegistry guard: " + describe(t));
-        }
+            Class<?> bsm = Class.forName("android.os.BluetoothServiceManager");
+            if (haveServiceRegisterer(bsm)) {
+                sFrameworkInitialized = true;
+                return;
+            }
 
-        try {
-            Class<?> initializer = Class.forName("android.bluetooth.BluetoothFrameworkInitializer");
-            Method register = initializer.getDeclaredMethod("registerServiceWrappers");
-            register.setAccessible(true);
-            register.invoke(null);
-            sFrameworkInitialized = true;
-            System.err.println("BluetoothFrameworkInitializer.registerServiceWrappers() ok");
-        } catch (Throwable t) {
-            System.err.println("Bluetooth framework init failed: " + describe(t));
-        } finally {
-            if (initializing != null) {
-                try {
-                    initializing.setBoolean(null, previous);
-                } catch (Throwable ignored) {
+            Class<?> registererClass =
+                    Class.forName("android.os.BluetoothServiceManager$ServiceRegisterer");
+            Object registerer = newServiceRegisterer(registererClass);
+            if (registerer == null) {
+                System.err.println("could not construct a ServiceRegisterer");
+                return;
+            }
+
+            for (java.lang.reflect.Field field : bsm.getDeclaredFields()) {
+                if (!field.getType().isAssignableFrom(registererClass)) {
+                    continue;
+                }
+                field.setAccessible(true);
+                if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+                    field.set(null, registerer);
                 }
             }
+
+            if (haveServiceRegisterer(bsm)) {
+                sFrameworkInitialized = true;
+                System.err.println("installed bluetooth_manager ServiceRegisterer");
+            } else {
+                System.err.println("ServiceRegisterer installed but getter still null");
+            }
+        } catch (Throwable t) {
+            System.err.println("bluetooth registerer install failed: " + describe(t));
         }
+    }
+
+    private static boolean haveServiceRegisterer(Class<?> bsm) {
+        try {
+            Method getter = bsm.getDeclaredMethod("getBluetoothManagerServiceRegisterer");
+            getter.setAccessible(true);
+            return getter.invoke(null) != null;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static Object newServiceRegisterer(Class<?> registererClass) {
+        for (java.lang.reflect.Constructor<?> ctor : registererClass.getDeclaredConstructors()) {
+            Class<?>[] types = ctor.getParameterTypes();
+            try {
+                ctor.setAccessible(true);
+                if (types.length == 1 && types[0] == String.class) {
+                    return ctor.newInstance("bluetooth_manager");
+                }
+                if (types.length == 0) {
+                    return ctor.newInstance();
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        return null;
     }
 
     private static Object serviceBinder(String name) throws Exception {
