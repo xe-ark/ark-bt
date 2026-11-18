@@ -35,145 +35,229 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-val CrimsonPrimary = Color(0xFFFF2E4C)
+// ---------------------------------------------------------------------------
+// Brand tokens
+// ---------------------------------------------------------------------------
+
+/** Primary brand crimson. Reserved for accents, selection and the crest. */
+val ArkCrimson = Color(0xFFFF3B5C)
+
+/** Deeper crimson used on light surfaces where [ArkCrimson] would vibrate. */
+val ArkCrimsonDeep = Color(0xFFC81E45)
+
+/** Very deep crimson used for gradients / glows. */
+val CrimsonDeep = Color(0xFF7A1026)
+
+// Backwards-compatible aliases used by the crest logo.
+val CrimsonPrimary = ArkCrimson
 val CrimsonSecondary = Color(0xFFFF6B81)
-val CrimsonDeep = Color(0xFF991B1B)
-val ObsidianBg = Color(0xFF07070A)
-val ObsidianSurface = Color(0xFF110D10)
-val ObsidianCard = Color(0xFF181115)
-val ObsidianSubCard = Color(0xFF22161C)
-val CrimsonBorder = Color(0xFF4A1522)
 
 @Immutable
-data class ArkBtExpressiveColors(
+data class ArkColors(
     val isDark: Boolean,
     val backdropBg: Color,
-    val cardBg: Color,
-    val heroTop: Color,
-    val heroBottom: Color,
-    val subCardBg: Color,
+    val surfaceBg: Color,
+    val raisedBg: Color,
+    val sunkenBg: Color,
     val border: Color,
-    val borderAccent: Color,
+    val borderStrong: Color,
     val textPrimary: Color,
     val textSecondary: Color,
-    val crimson: Color,
-    val crimsonSoft: Color,
-    val emerald: Color,
-    val amber: Color,
+    val textTertiary: Color,
+    val accent: Color,
+    val accentSoft: Color,
+    val accentContainer: Color,
+    val onAccent: Color,
+    val success: Color,
+    val warning: Color,
+    val danger: Color,
+    val heroTop: Color,
+    val heroBottom: Color,
 )
 
-val LocalArkBtColors = staticCompositionLocalOf {
-    ArkBtExpressiveColors(
-        isDark = true,
-        backdropBg = ObsidianBg,
-        cardBg = ObsidianCard,
-        heroTop = Color(0xFF280B14),
-        heroBottom = ObsidianCard,
-        subCardBg = ObsidianSubCard,
-        border = CrimsonBorder,
-        borderAccent = CrimsonPrimary,
-        textPrimary = Color(0xFFF8FAFC),
-        textSecondary = Color(0xFFB39EA5),
-        crimson = CrimsonPrimary,
-        crimsonSoft = CrimsonSecondary,
-        emerald = Color(0xFF34D399),
-        amber = Color(0xFFFBBF24),
-    )
-}
+private val DarkColors = ArkColors(
+    isDark = true,
+    backdropBg = Color(0xFF08080A),
+    surfaceBg = Color(0xFF121215),
+    raisedBg = Color(0xFF1A1A1F),
+    sunkenBg = Color(0xFF0D0D10),
+    border = Color(0xFF26262E),
+    borderStrong = Color(0xFF34343E),
+    textPrimary = Color(0xFFF4F4F6),
+    textSecondary = Color(0xFF9C9CA8),
+    textTertiary = Color(0xFF6B6B78),
+    accent = ArkCrimson,
+    accentSoft = Color(0xFFFF8194),
+    accentContainer = Color(0xFF2E1017),
+    onAccent = Color(0xFF2A0610),
+    success = Color(0xFF35D399),
+    warning = Color(0xFFFFB547),
+    danger = Color(0xFFFF5C74),
+    heroTop = Color(0xFF161216),
+    heroBottom = Color(0xFF121215),
+)
+
+private val LightColors = ArkColors(
+    isDark = false,
+    backdropBg = Color(0xFFF6F6F8),
+    surfaceBg = Color(0xFFFFFFFF),
+    raisedBg = Color(0xFFF0F0F4),
+    sunkenBg = Color(0xFFE8E8EE),
+    border = Color(0xFFE1E1E8),
+    borderStrong = Color(0xFFC9C9D4),
+    textPrimary = Color(0xFF141418),
+    textSecondary = Color(0xFF5B5B67),
+    textTertiary = Color(0xFF86868F),
+    accent = ArkCrimsonDeep,
+    accentSoft = Color(0xFFB01238),
+    accentContainer = Color(0xFFFDE8EC),
+    onAccent = Color(0xFFFFFFFF),
+    success = Color(0xFF0F9D63),
+    warning = Color(0xFFB4690E),
+    danger = Color(0xFFC8102E),
+    heroTop = Color(0xFFFFF5F7),
+    heroBottom = Color(0xFFFFFFFF),
+)
+
+val LocalArkColors = staticCompositionLocalOf { DarkColors }
+
+// ---------------------------------------------------------------------------
+// Material 3 colour schemes (kept in sync with ArkColors so M3 components —
+// Switch, Slider, buttons — automatically match the refreshed palette)
+// ---------------------------------------------------------------------------
 
 private val ArkDarkColorScheme = darkColorScheme(
-    primary = CrimsonPrimary,
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFF4C0D1E),
+    primary = ArkCrimson,
+    onPrimary = Color(0xFF2A0610),
+    primaryContainer = DarkColors.accentContainer,
     onPrimaryContainer = Color(0xFFFFD9DF),
-    secondary = CrimsonSecondary,
-    onSecondary = Color(0xFF2B0810),
-    secondaryContainer = Color(0xFF33151E),
+    secondary = Color(0xFFFF8194),
+    onSecondary = Color(0xFF2A0610),
+    secondaryContainer = Color(0xFF24161B),
     onSecondaryContainer = Color(0xFFFFD0D8),
-    tertiary = Color(0xFFF59E0B),
-    background = ObsidianBg,
-    onBackground = Color(0xFFF8FAFC),
-    surface = ObsidianSurface,
-    onSurface = Color(0xFFF8FAFC),
-    surfaceVariant = ObsidianSubCard,
-    onSurfaceVariant = Color(0xFFB8A3AA),
-    outline = CrimsonBorder,
-    error = Color(0xFFFF4D6A),
+    tertiary = DarkColors.warning,
+    background = DarkColors.backdropBg,
+    onBackground = DarkColors.textPrimary,
+    surface = DarkColors.surfaceBg,
+    onSurface = DarkColors.textPrimary,
+    surfaceVariant = DarkColors.raisedBg,
+    onSurfaceVariant = DarkColors.textSecondary,
+    surfaceContainer = DarkColors.raisedBg,
+    surfaceContainerHigh = Color(0xFF22222A),
+    surfaceContainerHighest = Color(0xFF2A2A33),
+    outline = DarkColors.borderStrong,
+    outlineVariant = DarkColors.border,
+    error = DarkColors.danger,
+    onError = Color(0xFF2A0610),
 )
 
 private val ArkLightColorScheme = lightColorScheme(
-    primary = Color(0xFFD6133B),
+    primary = ArkCrimsonDeep,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFFFD9DF),
+    primaryContainer = LightColors.accentContainer,
     onPrimaryContainer = Color(0xFF400010),
-    secondary = Color(0xFF881337),
+    secondary = Color(0xFF8C1231),
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFFFE4E8),
+    secondaryContainer = Color(0xFFFDE8EC),
     onSecondaryContainer = Color(0xFF380917),
-    tertiary = Color(0xFFB45309),
-    background = Color(0xFFFAF6F7),
-    onBackground = Color(0xFF140B0E),
-    surface = Color(0xFFFFFBFC),
-    onSurface = Color(0xFF140B0E),
-    surfaceVariant = Color(0xFFF4E6E9),
-    onSurfaceVariant = Color(0xFF5D464E),
-    outline = Color(0xFFE3C2CA),
-    error = Color(0xFFBA1A34),
+    tertiary = LightColors.warning,
+    background = LightColors.backdropBg,
+    onBackground = LightColors.textPrimary,
+    surface = LightColors.surfaceBg,
+    onSurface = LightColors.textPrimary,
+    surfaceVariant = LightColors.raisedBg,
+    onSurfaceVariant = LightColors.textSecondary,
+    surfaceContainer = LightColors.raisedBg,
+    surfaceContainerHigh = Color(0xFFEAEAF0),
+    surfaceContainerHighest = Color(0xFFE4E4EC),
+    outline = LightColors.borderStrong,
+    outlineVariant = LightColors.border,
+    error = LightColors.danger,
+    onError = Color.White,
 )
 
-private val ArkBtShapes = Shapes(
-    small = RoundedCornerShape(16.dp),
-    medium = RoundedCornerShape(24.dp),
-    large = RoundedCornerShape(28.dp),
-    extraLarge = RoundedCornerShape(32.dp),
+// ---------------------------------------------------------------------------
+// Shape & type scale
+// ---------------------------------------------------------------------------
+
+private val ArkShapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(22.dp),
+    extraLarge = RoundedCornerShape(28.dp),
 )
 
-private val ArkBtTypography = Typography(
+private val ArkTypography = Typography(
     displaySmall = TextStyle(
-        fontSize = 32.sp,
-        lineHeight = 36.sp,
+        fontSize = 30.sp,
+        lineHeight = 34.sp,
         fontWeight = FontWeight.ExtraBold,
         letterSpacing = (-0.8).sp,
     ),
-    headlineMedium = TextStyle(
-        fontSize = 26.sp,
+    headlineSmall = TextStyle(
+        fontSize = 24.sp,
         lineHeight = 30.sp,
         fontWeight = FontWeight.Bold,
         letterSpacing = (-0.5).sp,
     ),
     titleLarge = TextStyle(
-        fontSize = 20.sp,
-        lineHeight = 26.sp,
+        fontSize = 19.sp,
+        lineHeight = 25.sp,
         fontWeight = FontWeight.Bold,
-        letterSpacing = (-0.3).sp,
+        letterSpacing = (-0.2).sp,
     ),
     titleMedium = TextStyle(
-        fontSize = 16.sp,
-        lineHeight = 22.sp,
+        fontSize = 15.sp,
+        lineHeight = 21.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = (-0.1).sp,
+    ),
+    titleSmall = TextStyle(
+        fontSize = 13.sp,
+        lineHeight = 18.sp,
         fontWeight = FontWeight.SemiBold,
     ),
     bodyLarge = TextStyle(
-        fontSize = 15.sp,
+        fontSize = 14.5.sp,
         lineHeight = 20.sp,
-        fontWeight = FontWeight.Medium,
+        fontWeight = FontWeight.Normal,
     ),
     bodyMedium = TextStyle(
         fontSize = 13.sp,
         lineHeight = 18.sp,
         fontWeight = FontWeight.Normal,
     ),
+    bodySmall = TextStyle(
+        fontSize = 11.5.sp,
+        lineHeight = 16.sp,
+        fontWeight = FontWeight.Normal,
+    ),
     labelLarge = TextStyle(
         fontSize = 13.sp,
         lineHeight = 16.sp,
-        fontWeight = FontWeight.Bold,
-        letterSpacing = 0.2.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = 0.sp,
     ),
     labelMedium = TextStyle(
-        fontSize = 11.5.sp,
+        fontSize = 11.sp,
         lineHeight = 14.sp,
         fontWeight = FontWeight.SemiBold,
-        letterSpacing = 0.4.sp,
+        letterSpacing = 0.6.sp,
     ),
+    labelSmall = TextStyle(
+        fontSize = 10.sp,
+        lineHeight = 12.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 0.8.sp,
+    ),
+)
+
+/** Tabular-figure style so live numbers do not jitter while updating. */
+val ArkNumericStyle = TextStyle(
+    fontWeight = FontWeight.ExtraBold,
+    fontFeatureSettings = "tnum",
+    letterSpacing = (-1.4).sp,
 )
 
 @Composable
@@ -181,53 +265,21 @@ fun ArkBtTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
-    // Crimson-Black flagship identity prioritizes dark obsidian by default while still honoring light if desired;
-    // keep dark obsidian expressive palette active across system themes or use rich contrast for light.
-    val expressiveColors = if (darkTheme) {
-        ArkBtExpressiveColors(
-            isDark = true,
-            backdropBg = ObsidianBg,
-            cardBg = ObsidianCard,
-            heroTop = Color(0xFF2C0B15),
-            heroBottom = ObsidianCard,
-            subCardBg = ObsidianSubCard,
-            border = CrimsonBorder,
-            borderAccent = CrimsonPrimary,
-            textPrimary = Color(0xFFF8FAFC),
-            textSecondary = Color(0xFFB39EA5),
-            crimson = CrimsonPrimary,
-            crimsonSoft = CrimsonSecondary,
-            emerald = Color(0xFF34D399),
-            amber = Color(0xFFFBBF24),
-        )
-    } else {
-        ArkBtExpressiveColors(
-            isDark = false,
-            backdropBg = Color(0xFFFAF4F6),
-            cardBg = Color.White,
-            heroTop = Color(0xFFFFEEF1),
-            heroBottom = Color.White,
-            subCardBg = Color(0xFFF7E9ED),
-            border = Color(0xFFE7C5CD),
-            borderAccent = Color(0xFFD6133B),
-            textPrimary = Color(0xFF140B0E),
-            textSecondary = Color(0xFF644B53),
-            crimson = Color(0xFFD6133B),
-            crimsonSoft = Color(0xFFE11D48),
-            emerald = Color(0xFF059669),
-            amber = Color(0xFFD97706),
-        )
-    }
+    val colors = if (darkTheme) DarkColors else LightColors
 
-    CompositionLocalProvider(LocalArkBtColors provides expressiveColors) {
+    CompositionLocalProvider(LocalArkColors provides colors) {
         MaterialTheme(
             colorScheme = if (darkTheme) ArkDarkColorScheme else ArkLightColorScheme,
-            shapes = ArkBtShapes,
-            typography = ArkBtTypography,
+            shapes = ArkShapes,
+            typography = ArkTypography,
             content = content,
         )
     }
 }
+
+// ---------------------------------------------------------------------------
+// Brand crest
+// ---------------------------------------------------------------------------
 
 @Composable
 fun ArkCrestLogo(
@@ -237,8 +289,8 @@ fun ArkCrestLogo(
     val pulseAlphaState: State<Float> = if (animated) {
         val transition = rememberInfiniteTransition(label = "ArkCrestAura")
         transition.animateFloat(
-            initialValue = 0.22f,
-            targetValue = 0.52f,
+            initialValue = 0.18f,
+            targetValue = 0.46f,
             animationSpec = infiniteRepeatable(
                 animation = tween(durationMillis = 1600, easing = FastOutSlowInEasing),
                 repeatMode = RepeatMode.Reverse,
@@ -246,10 +298,10 @@ fun ArkCrestLogo(
             label = "auraAlpha",
         )
     } else {
-        remember { mutableFloatStateOf(0.24f) }
+        remember { mutableFloatStateOf(0.22f) }
     }
 
-    val archColor = if (LocalArkBtColors.current.isDark) Color(0xFFF8FAFC) else Color(0xFF181115)
+    val archColor = if (LocalArkColors.current.isDark) Color(0xFFF8FAFC) else Color(0xFF181115)
 
     Canvas(modifier = modifier) {
         val pulseAlpha = pulseAlphaState.value
@@ -297,7 +349,7 @@ fun ArkCrestLogo(
 
         drawPath(
             path = shield,
-            color = CrimsonPrimary.copy(alpha = 0.14f),
+            color = CrimsonPrimary.copy(alpha = 0.12f),
         )
         drawPath(
             path = shield,

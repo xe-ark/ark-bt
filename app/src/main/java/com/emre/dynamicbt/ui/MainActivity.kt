@@ -14,6 +14,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -21,6 +22,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,8 +46,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -70,7 +72,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
@@ -121,8 +125,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.dark(AndroidColor.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.dark(AndroidColor.TRANSPARENT),
+            statusBarStyle = SystemBarStyle.auto(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.auto(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT),
         )
         super.onCreate(savedInstanceState)
         DynamicBtServiceState.init(this)
@@ -135,7 +139,7 @@ class MainActivity : ComponentActivity() {
         startDynamicBtService()
 
         setContent {
-            ArkBtTheme(darkTheme = true) {
+            ArkBtTheme(darkTheme = isSystemInDarkTheme()) {
                 ArkBtScreen(
                     onToggleService = { shouldRun ->
                         if (shouldRun) {
@@ -209,7 +213,7 @@ private fun ArkBtScreen(
     onToggleService: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
-    val c = LocalArkBtColors.current
+    val c = LocalArkColors.current
     val status by DynamicBtServiceState.status.collectAsState()
 
     var showAllApps by remember { mutableStateOf(false) }
@@ -260,32 +264,19 @@ private fun ArkBtScreen(
             .fillMaxSize()
             .background(c.backdropBg)
     ) {
-        // Ambient Crimson & Obsidian Expressive Glow Backdrop
+        // Soft ambient brand glow — one subtle wash instead of the previous dual heavy gradient.
         Canvas(modifier = Modifier.fillMaxSize()) {
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        CrimsonPrimary.copy(alpha = 0.16f),
-                        CrimsonDeep.copy(alpha = 0.05f),
+                        c.accent.copy(alpha = if (c.isDark) 0.10f else 0.06f),
                         Color.Transparent,
                     ),
-                    center = Offset(size.width * 0.86f, size.height * 0.08f),
-                    radius = size.width * 0.85f,
+                    center = Offset(size.width * 0.92f, 0f),
+                    radius = size.width * 0.95f,
                 ),
-                radius = size.width * 0.85f,
-                center = Offset(size.width * 0.86f, size.height * 0.08f),
-            )
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        CrimsonDeep.copy(alpha = 0.14f),
-                        Color.Transparent,
-                    ),
-                    center = Offset(size.width * 0.12f, size.height * 0.62f),
-                    radius = size.width * 0.72f,
-                ),
-                radius = size.width * 0.72f,
-                center = Offset(size.width * 0.12f, size.height * 0.62f),
+                radius = size.width * 0.95f,
+                center = Offset(size.width * 0.92f, 0f),
             )
         }
 
@@ -294,27 +285,24 @@ private fun ArkBtScreen(
             contentPadding = PaddingValues(
                 start = 16.dp,
                 end = 16.dp,
-                top = topInset + 12.dp,
+                top = topInset + 8.dp,
                 bottom = bottomInset + 24.dp,
             ),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item(key = "header") {
-                ExpressiveHeader(
-                    running = status.running,
-                    onToggleService = { onToggleService(!status.running) },
-                )
+                ArkHeader(running = status.running)
             }
 
             item(key = "hero") {
-                ExpressiveHeroTelemetryCard(
+                TelemetryCard(
                     status = status,
                     onToggleService = { onToggleService(!status.running) },
                 )
             }
 
             item(key = "controls") {
-                ExpressiveControlsCard(
+                PolicyCard(
                     status = status,
                     debounceSlider = debounceSlider,
                     onDebounceChange = {
@@ -331,7 +319,7 @@ private fun ArkBtScreen(
             }
 
             item(key = "whitelist_header") {
-                ExpressiveWhitelistHeader(
+                WhitelistCard(
                     whitelistCount = status.whitelist.size,
                     searchQuery = searchQuery,
                     onSearchChange = { searchQuery = it },
@@ -340,31 +328,49 @@ private fun ArkBtScreen(
                 )
             }
 
-            items(
-                items = filteredApps,
-                key = { it.packageName },
-                contentType = { "app_row" },
-            ) { entry ->
-                ExpressiveAppCard(
-                    entry = entry,
-                    whitelisted = entry.packageName in status.whitelist,
-                    onToggle = { checked ->
-                        val next = status.whitelist.toMutableSet()
-                        if (checked) next.add(entry.packageName) else next.remove(entry.packageName)
-                        DynamicBtServiceState.updateWhitelist(next)
-                    },
+            if (filteredApps.isEmpty()) {
+                item(key = "empty") {
+                    EmptyState(searchQuery = searchQuery)
+                }
+            } else {
+                items(
+                    items = filteredApps,
+                    key = { it.packageName },
+                    contentType = { "app_row" },
+                ) { entry ->
+                    AppRow(
+                        entry = entry,
+                        whitelisted = entry.packageName in status.whitelist,
+                        onToggle = { checked ->
+                            val next = status.whitelist.toMutableSet()
+                            if (checked) next.add(entry.packageName) else next.remove(entry.packageName)
+                            DynamicBtServiceState.updateWhitelist(next)
+                        },
+                    )
+                }
+            }
+
+            item(key = "footer") {
+                Text(
+                    text = "Xe.Ark Audio Engine · ${status.whitelist.size} uygulama Hi-Res whitelist'te",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = c.textTertiary,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp, bottom = 4.dp),
                 )
             }
         }
     }
 }
 
+// ---------------------------------------------------------------------------
+// Header
+// ---------------------------------------------------------------------------
+
 @Composable
-private fun ExpressiveHeader(
-    running: Boolean,
-    onToggleService: () -> Unit,
-) {
-    val c = LocalArkBtColors.current
+private fun ArkHeader(running: Boolean) {
+    val c = LocalArkColors.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -372,7 +378,7 @@ private fun ExpressiveHeader(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         ArkCrestLogo(
-            modifier = Modifier.size(48.dp),
+            modifier = Modifier.size(46.dp),
             animated = running,
         )
         Spacer(Modifier.width(12.dp))
@@ -385,77 +391,95 @@ private fun ExpressiveHeader(
             Text(
                 text = "Xe.Ark Audio Engine",
                 style = MaterialTheme.typography.labelMedium,
-                color = c.crimsonSoft,
+                color = c.textTertiary,
             )
         }
 
-        Surface(
-            onClick = onToggleService,
-            shape = CircleShape,
-            color = if (running) c.crimson.copy(alpha = 0.18f) else c.subCardBg,
-            border = BorderStroke(
-                width = 1.dp,
-                color = if (running) c.crimson.copy(alpha = 0.55f) else c.border,
-            ),
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(if (running) c.emerald else c.crimson),
-                )
-                Spacer(Modifier.width(7.dp))
-                Text(
-                    text = if (running) "AKTİF" else "DURDU",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = if (running) c.textPrimary else c.crimsonSoft,
-                )
-            }
-        }
+        StatusPill(running = running)
     }
 }
 
 @Composable
-private fun ExpressiveHeroTelemetryCard(
+private fun StatusPill(running: Boolean) {
+    val c = LocalArkColors.current
+    val dotColor by animateColorAsState(
+        targetValue = if (running) c.success else c.textTertiary,
+        animationSpec = tween(220),
+        label = "statusDot",
+    )
+    Surface(
+        shape = CircleShape,
+        color = if (running) c.success.copy(alpha = 0.10f) else c.raisedBg,
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (running) c.success.copy(alpha = 0.35f) else c.border,
+        ),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(7.dp)
+                    .clip(CircleShape)
+                    .background(dotColor),
+            )
+            Spacer(Modifier.width(7.dp))
+            Text(
+                text = if (running) "Aktif" else "Durduruldu",
+                style = MaterialTheme.typography.labelLarge,
+                color = if (running) c.textPrimary else c.textSecondary,
+            )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Telemetry
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun TelemetryCard(
     status: ServiceStatus,
     onToggleService: () -> Unit,
 ) {
-    val c = LocalArkBtColors.current
+    val c = LocalArkColors.current
 
     val modeLabel: String
     val modeColor: Color
     when (status.mode) {
         PolicyMode.DYNAMIC -> {
-            modeLabel = "DYNAMIC HI-RES"
-            modeColor = c.crimson
+            modeLabel = "DİNAMİK Hİ-RES"
+            modeColor = c.accent
         }
+
         PolicyMode.HOLD -> {
-            modeLabel = "HOLD HYSTERESIS"
-            modeColor = c.amber
+            modeLabel = "HYSTERESIS"
+            modeColor = c.warning
         }
+
         PolicyMode.DEFAULT -> {
-            modeLabel = "DEFAULT PROFİL"
-            modeColor = c.crimsonSoft
+            modeLabel = "VARSAYILAN"
+            modeColor = c.textSecondary
         }
+
         PolicyMode.DISABLED -> {
             modeLabel = "DEVRE DIŞI"
-            modeColor = c.textSecondary
+            modeColor = c.textTertiary
         }
     }
 
     val displayRate = status.a2dp.sampleRateHz.takeIf { it > 0 } ?: status.targetRateHz
     val displayBits = status.a2dp.bitsPerSample.takeIf { it > 0 } ?: status.targetBits
-    val codecLabel = if (status.a2dp.connected) status.a2dp.codecName else "BEKLEMEDE"
+    val codecLabel = if (status.a2dp.connected) status.a2dp.codecName.uppercase(Locale.getDefault()) else "—"
 
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(),
         shape = MaterialTheme.shapes.large,
-        color = Color.Transparent,
+        color = c.surfaceBg,
         border = BorderStroke(1.dp, c.border),
     ) {
         Column(
@@ -468,39 +492,16 @@ private fun ExpressiveHeroTelemetryCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Surface(
-                    shape = CircleShape,
-                    color = modeColor.copy(alpha = 0.16f),
-                    border = BorderStroke(1.dp, modeColor.copy(alpha = 0.45f)),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(7.dp)
-                                .clip(CircleShape)
-                                .background(modeColor),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = modeLabel,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = modeColor,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                }
+                ModePill(label = modeLabel, color = modeColor)
 
                 FilledTonalButton(
                     onClick = onToggleService,
                     shape = CircleShape,
                     colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = c.subCardBg,
-                        contentColor = c.textPrimary,
+                        containerColor = if (status.running) c.raisedBg else c.accent,
+                        contentColor = if (status.running) c.textPrimary else c.onAccent,
                     ),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                    contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
                 ) {
                     Text(
                         text = if (status.running) "Durdur" else "Başlat",
@@ -509,250 +510,337 @@ private fun ExpressiveHeroTelemetryCard(
                 }
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(18.dp))
 
-            // Big Expressive Audio Readout
+            // Hero readout — tabular digits keep the number from shifting.
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        text = "${formatKhz(displayRate)} kHz",
-                        fontSize = 36.sp,
-                        lineHeight = 40.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = (-1.0).sp,
+                Text(
+                    text = formatKhz(displayRate),
+                    style = ArkNumericStyle.copy(
+                        fontSize = 42.sp,
+                        lineHeight = 44.sp,
                         color = c.textPrimary,
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        text = "$displayBits-bit",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = c.crimsonSoft,
-                        modifier = Modifier.padding(bottom = 4.dp),
-                    )
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = if (status.a2dp.connected) c.crimson else c.subCardBg,
-                ) {
-                    Text(
-                        text = codecLabel,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = if (status.a2dp.connected) Color.White else c.textSecondary,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    )
-                }
+                    ),
+                )
+                Text(
+                    text = "kHz",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = c.textSecondary,
+                    modifier = Modifier.padding(start = 6.dp, bottom = 7.dp),
+                )
+                Spacer(Modifier.weight(1f))
+                CodecBadge(label = codecLabel, connected = status.a2dp.connected)
             }
 
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(2.dp))
             Text(
-                text = "Politika hedefi: ${formatKhz(status.targetRateHz)} kHz / ${status.targetBits}-bit",
+                text = buildString {
+                    append("$displayBits-bit")
+                    append("  ·  hedef ${formatKhz(status.targetRateHz)} kHz / ${status.targetBits}-bit")
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = c.textSecondary,
             )
 
             Spacer(Modifier.height(14.dp))
+            HorizontalDivider(color = c.border)
+            Spacer(Modifier.height(4.dp))
 
-            // 2x2 Expressive Bento Grid
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                MetricTile(
-                    title = "OYNATAN UYGULAMA",
-                    value = status.activeApp ?: "Ses yok",
-                    subtitle = if (status.activeWhitelisted) "[HI-RES WHITELIST]" else "Standart rota",
-                    accent = status.activeWhitelisted,
-                    modifier = Modifier.weight(1f),
-                )
-                MetricTile(
-                    title = "TRACK FORMATI",
-                    value = if (status.activeTrackRateHz != null) {
-                        "${formatKhz(status.activeTrackRateHz)} kHz"
-                    } else {
-                        "-"
-                    },
-                    subtitle = if (status.activeTrackRateHz != null) {
-                        "${status.activeTrackBits ?: "?"}-bit akış"
-                    } else {
-                        "Beklemede"
-                    },
-                    accent = status.activeTrackRateHz != null && status.activeTrackRateHz > 48000,
-                    modifier = Modifier.weight(1f),
-                )
+            val btValue = when {
+                !status.a2dp.connected -> "Bağlı değil"
+                else -> status.a2dp.deviceName?.takeIf { it.isNotBlank() }
+                    ?: status.a2dp.deviceAddress?.takeIf { it.isNotBlank() }
+                    ?: "Bağlı"
+            }
+            val usbValue = if (status.usb.connected) {
+                status.usb.deviceName ?: "USB DAC"
+            } else {
+                "Bağlı değil"
+            }
+            val usbDetail = if (status.usb.connected && status.usb.sampleRates.isNotEmpty()) {
+                status.usb.sampleRates.joinToString(" · ") { "${formatKhz(it)} kHz" }
+            } else {
+                "Kablolu çıkış yok"
             }
 
-            Spacer(Modifier.height(10.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                val btValue = when {
-                    !status.a2dp.connected -> "Bağlı değil"
-                    !status.a2dp.deviceName.isNullOrBlank() -> status.a2dp.deviceName
-                    !status.a2dp.deviceAddress.isNullOrBlank() -> status.a2dp.deviceAddress
-                    else -> "Bağlı"
-                }
-                MetricTile(
-                    title = "BT CİHAZI",
-                    value = btValue,
-                    subtitle = if (status.outputBtA2dp) "A2DP çıkışı aktif" else "A2DP pasif",
-                    accent = status.a2dp.connected && status.outputBtA2dp,
-                    modifier = Modifier.weight(1f),
-                )
-
-                val usbValue = if (status.usb.connected) {
-                    status.usb.deviceName ?: "USB DAC"
-                } else {
-                    "Bağlı değil"
-                }
-                val usbSub = if (status.usb.connected && status.usb.sampleRates.isNotEmpty()) {
-                    status.usb.sampleRates.joinToString(", ") { "${formatKhz(it)}k" }
-                } else {
-                    "Kablolu çıkış yok"
-                }
-                MetricTile(
-                    title = "USB-C DAC",
-                    value = usbValue,
-                    subtitle = usbSub,
-                    accent = status.usb.connected,
-                    modifier = Modifier.weight(1f),
-                )
-            }
+            TelemetryRow(
+                label = "Oynatan uygulama",
+                value = status.activeApp ?: "Ses yok",
+                detail = when {
+                    status.activeApp == null -> "Beklemede"
+                    status.activeWhitelisted -> "Hi-Res whitelist"
+                    else -> "Standart rota"
+                },
+                accent = status.activeWhitelisted,
+                badge = if (status.activeWhitelisted) "HI-RES" else null,
+                showDivider = true,
+            )
+            TelemetryRow(
+                label = "Parça formatı",
+                value = status.activeTrackRateHz?.let { "${formatKhz(it)} kHz" } ?: "—",
+                detail = status.activeTrackRateHz?.let { "${status.activeTrackBits ?: "?"}-bit akış" }
+                    ?: "Beklemede",
+                accent = (status.activeTrackRateHz ?: 0) > 48000,
+                showDivider = true,
+            )
+            TelemetryRow(
+                label = "Bluetooth çıkışı",
+                value = btValue,
+                detail = if (status.outputBtA2dp) "A2DP çıkışı aktif" else "A2DP pasif",
+                accent = status.a2dp.connected && status.outputBtA2dp,
+                showDivider = true,
+            )
+            TelemetryRow(
+                label = "USB-C DAC",
+                value = usbValue,
+                detail = usbDetail,
+                accent = status.usb.connected,
+                showDivider = false,
+            )
 
             val selectableRates = CodecCaps.rateMaskToHzList(status.a2dp.selectableRateMask)
             if (status.a2dp.connected && selectableRates.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
-                HorizontalDivider(color = c.border.copy(alpha = 0.6f))
-                Spacer(Modifier.height(10.dp))
+                HorizontalDivider(color = c.border)
+                Spacer(Modifier.height(12.dp))
                 Text(
-                    text = "Kulaklık Destekli Örnekleme Hızları",
+                    text = "Kulaklığın desteklediği hızlar",
                     style = MaterialTheme.typography.labelMedium,
-                    color = c.textSecondary,
+                    color = c.textTertiary,
                 )
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     selectableRates.forEach { hz ->
                         val active = hz == status.a2dp.sampleRateHz
-                        Surface(
-                            shape = CircleShape,
-                            color = if (active) c.crimson.copy(alpha = 0.22f) else c.subCardBg,
-                            border = BorderStroke(
-                                1.dp,
-                                if (active) c.crimson else c.border,
-                            ),
-                        ) {
-                            Text(
-                                text = "${formatKhz(hz)} kHz",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = if (active) c.textPrimary else c.textSecondary,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            )
-                        }
+                        SmallChip(
+                            text = "${formatKhz(hz)} kHz",
+                            active = active,
+                            accent = c.accent,
+                        )
                     }
                 }
             }
 
             if (!status.lastError.isNullOrBlank()) {
-                Spacer(Modifier.height(10.dp))
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = c.crimson.copy(alpha = 0.14f),
-                    border = BorderStroke(1.dp, c.crimson.copy(alpha = 0.4f)),
-                ) {
-                    Text(
-                        text = "Tanı: ${status.lastError}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = c.crimsonSoft,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    )
-                }
+                Spacer(Modifier.height(12.dp))
+                DiagnosticBanner(message = status.lastError)
             }
         }
     }
 }
 
 @Composable
-private fun MetricTile(
-    title: String,
-    value: String,
-    subtitle: String,
-    accent: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    val c = LocalArkBtColors.current
+private fun ModePill(label: String, color: Color) {
     Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(20.dp),
-        color = c.subCardBg,
-        border = BorderStroke(
-            width = 1.dp,
-            color = if (accent) c.crimson.copy(alpha = 0.45f) else c.border.copy(alpha = 0.55f),
-        ),
+        shape = CircleShape,
+        color = color.copy(alpha = 0.10f),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.30f)),
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Row(
+            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(color),
+            )
+            Spacer(Modifier.width(6.dp))
             Text(
-                text = title,
+                text = label,
                 style = MaterialTheme.typography.labelMedium,
-                fontSize = 10.sp,
-                color = c.textSecondary,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleMedium,
-                fontSize = 14.sp,
-                color = c.textPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                fontSize = 11.5.sp,
-                color = if (accent) c.crimsonSoft else c.textSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                color = color,
             )
         }
     }
 }
 
 @Composable
-private fun ExpressiveControlsCard(
+private fun CodecBadge(label: String, connected: Boolean) {
+    val c = LocalArkColors.current
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = if (connected) c.accentContainer else c.raisedBg,
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (connected) c.accent.copy(alpha = 0.45f) else c.border,
+        ),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (connected) c.accentSoft else c.textTertiary,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+        )
+    }
+}
+
+@Composable
+private fun TelemetryRow(
+    label: String,
+    value: String,
+    detail: String,
+    accent: Boolean,
+    badge: String? = null,
+    showDivider: Boolean,
+) {
+    val c = LocalArkColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label.uppercase(Locale.getDefault()),
+                style = MaterialTheme.typography.labelSmall,
+                color = c.textTertiary,
+            )
+            Spacer(Modifier.height(3.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = value,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = c.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (badge != null) {
+                    Spacer(Modifier.width(8.dp))
+                    HiResBadge(text = badge)
+                }
+            }
+            Spacer(Modifier.height(1.dp))
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (accent) c.accentSoft else c.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+    if (showDivider) {
+        HorizontalDivider(color = c.border.copy(alpha = 0.7f))
+    }
+}
+
+@Composable
+private fun HiResBadge(text: String) {
+    val c = LocalArkColors.current
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = c.accent.copy(alpha = 0.14f),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = c.accentSoft,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+    }
+}
+
+@Composable
+private fun SmallChip(text: String, active: Boolean, accent: Color) {
+    val c = LocalArkColors.current
+    Surface(
+        shape = CircleShape,
+        color = if (active) accent.copy(alpha = 0.16f) else c.raisedBg,
+        border = BorderStroke(1.dp, if (active) accent.copy(alpha = 0.55f) else c.border),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (active) c.textPrimary else c.textSecondary,
+            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+        )
+    }
+}
+
+@Composable
+private fun DiagnosticBanner(message: String) {
+    val c = LocalArkColors.current
+    var expanded by remember { mutableStateOf(false) }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = c.danger.copy(alpha = 0.08f),
+        border = BorderStroke(1.dp, c.danger.copy(alpha = 0.25f)),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Tanı",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = c.danger,
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = if (expanded) "Daralt" else "Ayrıntı",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = c.danger.copy(alpha = 0.85f),
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = c.danger.copy(alpha = 0.92f),
+                maxLines = if (expanded) Int.MAX_VALUE else 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Policy / profile controls
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun PolicyCard(
     status: ServiceStatus,
     debounceSlider: Float,
     onDebounceChange: (Float) -> Unit,
     onDebounceFinished: () -> Unit,
 ) {
-    val c = LocalArkBtColors.current
+    val c = LocalArkColors.current
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
-        color = c.cardBg,
+        color = c.surfaceBg,
         border = BorderStroke(1.dp, c.border),
     ) {
         Column(modifier = Modifier.padding(18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Dinamik Hi-Res Modu",
+                        text = "Dinamik Hi-Res",
                         style = MaterialTheme.typography.titleLarge,
-                        fontSize = 18.sp,
                         color = c.textPrimary,
                     )
+                    Spacer(Modifier.height(2.dp))
                     Text(
-                        text = "Whitelist uygulamalarında kaynaktan gelen kHz'e geç",
+                        text = "Whitelist uygulamalarında kaynağın hızına geçer",
                         style = MaterialTheme.typography.bodyMedium,
                         color = c.textSecondary,
                     )
@@ -761,90 +849,96 @@ private fun ExpressiveControlsCard(
                 Switch(
                     checked = status.enabled,
                     onCheckedChange = { DynamicBtServiceState.setEnabled(it) },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = c.crimson,
-                        uncheckedThumbColor = c.textSecondary,
-                        uncheckedTrackColor = c.subCardBg,
-                        uncheckedBorderColor = c.border,
-                    ),
+                    colors = arkSwitchColors(),
                 )
             }
 
-            Spacer(Modifier.height(14.dp))
-            HorizontalDivider(color = c.border.copy(alpha = 0.6f))
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider(color = c.border)
+            Spacer(Modifier.height(16.dp))
 
-            Text(
-                text = "Varsayılan Örnekleme Hızı (Whitelist Dışı)",
-                style = MaterialTheme.typography.labelLarge,
-                color = c.textPrimary,
-            )
+            SectionLabel("Varsayılan hız · whitelist dışı")
             Spacer(Modifier.height(8.dp))
             Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 listOf(44100, 48000, 88200, 96000).forEach { rate ->
-                    ExpressivePillChip(
-                        label = "${formatKhz(rate)} kHz",
+                    SegmentButton(
+                        text = "${formatKhz(rate)} kHz",
                         selected = status.config.defaultRateHz == rate,
                         onClick = {
                             DynamicBtServiceState.updateConfig { it.copy(defaultRateHz = rate) }
                         },
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }
 
-            Spacer(Modifier.height(14.dp))
-            Text(
-                text = "Bit Derinliği",
-                style = MaterialTheme.typography.labelLarge,
-                color = c.textPrimary,
-            )
+            Spacer(Modifier.height(16.dp))
+            SectionLabel("Bit derinliği")
             Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 listOf(16, 24, 32).forEach { bits ->
-                    ExpressivePillChip(
-                        label = "$bits-bit",
+                    SegmentButton(
+                        text = "$bits-bit",
                         selected = status.config.defaultBits == bits,
                         onClick = {
                             DynamicBtServiceState.updateConfig { it.copy(defaultBits = bits) }
                         },
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }
 
-            Spacer(Modifier.height(14.dp))
-            val secs = (debounceSlider / 100f).roundToLong() / 10.0
+            Spacer(Modifier.height(18.dp))
+            val secs = (debounceSlider / 1000f)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = "Geçiş Gecikmesi (Hysteresis / Debounce)",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = c.textPrimary,
-                )
-                Text(
-                    text = "$secs sn",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = c.crimsonSoft,
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Anahtarlama gecikmesi",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = c.textPrimary,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = "Hızlı parça geçişlerinde gereksiz codec değişimini engeller",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = c.textSecondary,
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Surface(
+                    shape = CircleShape,
+                    color = c.accent.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, c.accent.copy(alpha = 0.35f)),
+                ) {
+                    Text(
+                        text = String.format(Locale.US, "%.1f sn", secs),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = c.accentSoft,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    )
+                }
             }
             Slider(
                 value = debounceSlider,
                 onValueChange = onDebounceChange,
                 onValueChangeFinished = onDebounceFinished,
-                valueRange = 0f..15000f,
-                steps = 29,
+                valueRange = 0f..10000f,
+                steps = 19,
                 colors = SliderDefaults.colors(
-                    thumbColor = c.crimson,
-                    activeTrackColor = c.crimson,
-                    inactiveTrackColor = c.subCardBg,
-                    activeTickColor = Color.White.copy(alpha = 0.5f),
-                    inactiveTickColor = c.border,
+                    thumbColor = c.accent,
+                    activeTrackColor = c.accent,
+                    inactiveTrackColor = c.sunkenBg,
+                    activeTickColor = Color.Transparent,
+                    inactiveTickColor = Color.Transparent,
                 ),
             )
         }
@@ -852,51 +946,88 @@ private fun ExpressiveControlsCard(
 }
 
 @Composable
-private fun ExpressivePillChip(
-    label: String,
+private fun SectionLabel(text: String) {
+    Text(
+        text = text.uppercase(Locale.getDefault()),
+        style = MaterialTheme.typography.labelSmall,
+        color = LocalArkColors.current.textTertiary,
+    )
+}
+
+@Composable
+private fun SegmentButton(
+    text: String,
     selected: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val c = LocalArkBtColors.current
+    val c = LocalArkColors.current
     val bg by animateColorAsState(
-        targetValue = if (selected) c.crimson else c.subCardBg,
+        targetValue = if (selected) c.accent else c.raisedBg,
         animationSpec = tween(180),
-        label = "chipBg",
+        label = "segmentBg",
     )
-    val borderColor by animateColorAsState(
-        targetValue = if (selected) c.crimsonSoft else c.border,
+    val border by animateColorAsState(
+        targetValue = if (selected) c.accent else c.border,
         animationSpec = tween(180),
-        label = "chipBorder",
+        label = "segmentBorder",
+    )
+    val textColor by animateColorAsState(
+        targetValue = if (selected) c.onAccent else c.textSecondary,
+        animationSpec = tween(180),
+        label = "segmentText",
     )
 
     Surface(
         onClick = onClick,
-        shape = CircleShape,
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
         color = bg,
-        border = BorderStroke(1.dp, borderColor),
+        border = BorderStroke(1.dp, border),
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelLarge,
-            color = if (selected) Color.White else c.textSecondary,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
-        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 11.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge.copy(fontSize = 12.sp),
+                color = textColor,
+                maxLines = 1,
+                overflow = TextOverflow.Clip,
+            )
+        }
     }
 }
 
 @Composable
-private fun ExpressiveWhitelistHeader(
+private fun arkSwitchColors() = SwitchDefaults.colors(
+    checkedThumbColor = Color.White,
+    checkedTrackColor = LocalArkColors.current.accent,
+    uncheckedThumbColor = LocalArkColors.current.textTertiary,
+    uncheckedTrackColor = LocalArkColors.current.sunkenBg,
+    uncheckedBorderColor = LocalArkColors.current.border,
+)
+
+// ---------------------------------------------------------------------------
+// Whitelist
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun WhitelistCard(
     whitelistCount: Int,
     searchQuery: String,
     onSearchChange: (String) -> Unit,
     showAllApps: Boolean,
     onShowAllChange: (Boolean) -> Unit,
 ) {
-    val c = LocalArkBtColors.current
+    val c = LocalArkColors.current
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
-        color = c.cardBg,
+        color = c.surfaceBg,
         border = BorderStroke(1.dp, c.border),
     ) {
         Column(modifier = Modifier.padding(18.dp)) {
@@ -908,17 +1039,17 @@ private fun ExpressiveWhitelistHeader(
                 Text(
                     text = "Hi-Res Whitelist",
                     style = MaterialTheme.typography.titleLarge,
-                    fontSize = 18.sp,
                     color = c.textPrimary,
                 )
                 Surface(
                     shape = CircleShape,
-                    color = c.crimson.copy(alpha = 0.18f),
+                    color = c.raisedBg,
+                    border = BorderStroke(1.dp, c.border),
                 ) {
                     Text(
-                        text = "$whitelistCount uygulama",
+                        text = "$whitelistCount seçili",
                         style = MaterialTheme.typography.labelMedium,
-                        color = c.crimsonSoft,
+                        color = c.textSecondary,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                     )
                 }
@@ -926,69 +1057,36 @@ private fun ExpressiveWhitelistHeader(
 
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "Seçili uygulamalarda gerçek örnekleme hızı açılır; diğer uygulamalarda varsayılan profil uygulanır.",
+                text = "Seçili uygulamalarda gerçek örnekleme hızı açılır; diğerleri varsayılan profili kullanır.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = c.textSecondary,
             )
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(14.dp))
+            SearchField(
+                query = searchQuery,
+                onQueryChange = onSearchChange,
+            )
 
-            // Expressive Pill Search Bar
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = CircleShape,
-                color = c.subCardBg,
-                border = BorderStroke(1.dp, c.border),
-            ) {
-                Box(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    contentAlignment = Alignment.CenterStart,
-                ) {
-                    if (searchQuery.isEmpty()) {
-                        Text(
-                            text = "Uygulama veya paket adı ara...",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = c.textSecondary,
-                        )
-                    }
-                    BasicTextField(
-                        value = searchQuery,
-                        onValueChange = onSearchChange,
-                        singleLine = true,
-                        textStyle = TextStyle(
-                            color = c.textPrimary,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                        ),
-                        cursorBrush = SolidColor(c.crimson),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(6.dp))
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onShowAllChange(!showAllApps) },
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onShowAllChange(!showAllApps) }
+                    .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
                     text = "Tüm kullanıcı uygulamalarını göster",
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = c.textPrimary,
+                    color = c.textSecondary,
                 )
                 Switch(
                     checked = showAllApps,
                     onCheckedChange = onShowAllChange,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = c.crimson,
-                        uncheckedThumbColor = c.textSecondary,
-                        uncheckedTrackColor = c.subCardBg,
-                        uncheckedBorderColor = c.border,
-                    ),
+                    colors = arkSwitchColors(),
                 )
             }
         }
@@ -996,23 +1094,132 @@ private fun ExpressiveWhitelistHeader(
 }
 
 @Composable
-private fun ExpressiveAppCard(
+private fun SearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+) {
+    val c = LocalArkColors.current
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = c.sunkenBg,
+        border = BorderStroke(1.dp, c.border),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SearchGlyph(
+                color = c.textTertiary,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Box(modifier = Modifier.weight(1f)) {
+                if (query.isEmpty()) {
+                    Text(
+                        text = "Uygulama veya paket adı ara",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = c.textTertiary,
+                    )
+                }
+                BasicTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    singleLine = true,
+                    textStyle = TextStyle(
+                        color = c.textPrimary,
+                        fontSize = 14.5.sp,
+                        fontWeight = FontWeight.Medium,
+                    ),
+                    cursorBrush = SolidColor(c.accent),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            if (query.isNotEmpty()) {
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "✕",
+                    fontSize = 14.sp,
+                    color = c.textTertiary,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .clickable { onQueryChange("") }
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchGlyph(color: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val strokeWidth = size.minDimension * 0.11f
+        drawCircle(
+            color = color,
+            radius = size.minDimension * 0.30f,
+            center = Offset(size.width * 0.42f, size.height * 0.42f),
+            style = Stroke(width = strokeWidth),
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.63f, size.height * 0.63f),
+            end = Offset(size.width * 0.88f, size.height * 0.88f),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
+    }
+}
+
+@Composable
+private fun EmptyState(searchQuery: String) {
+    val c = LocalArkColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = if (searchQuery.isBlank()) "Gösterilecek uygulama yok" else "Eşleşen uygulama yok",
+            style = MaterialTheme.typography.titleMedium,
+            color = c.textSecondary,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = if (searchQuery.isBlank()) {
+                "Tüm uygulamaları görmek için yukarıdaki anahtarı açın."
+            } else {
+                "Farklı bir ad veya paket adı deneyin."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = c.textTertiary,
+        )
+    }
+}
+
+@Composable
+private fun AppRow(
     entry: AppEntry,
     whitelisted: Boolean,
     onToggle: (Boolean) -> Unit,
 ) {
-    val c = LocalArkBtColors.current
+    val c = LocalArkColors.current
+    val borderColor by animateColorAsState(
+        targetValue = if (whitelisted) c.accent.copy(alpha = 0.45f) else Color.Transparent,
+        animationSpec = tween(180),
+        label = "appRowBorder",
+    )
+
     Surface(
+        onClick = { onToggle(!whitelisted) },
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        color = c.cardBg,
-        border = BorderStroke(
-            width = 1.dp,
-            color = if (whitelisted) c.crimson.copy(alpha = 0.55f) else c.border.copy(alpha = 0.65f),
-        ),
+        shape = MaterialTheme.shapes.medium,
+        color = c.surfaceBg,
+        border = BorderStroke(1.dp, borderColor),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (entry.icon != null) {
@@ -1020,21 +1227,21 @@ private fun ExpressiveAppCard(
                     bitmap = entry.icon,
                     contentDescription = entry.label,
                     modifier = Modifier
-                        .size(42.dp)
-                        .clip(RoundedCornerShape(12.dp)),
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(10.dp)),
                 )
             } else {
                 Box(
                     modifier = Modifier
-                        .size(42.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(c.subCardBg),
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(c.raisedBg),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         text = entry.label.take(1).uppercase(Locale.getDefault()),
                         style = MaterialTheme.typography.titleMedium,
-                        color = c.crimsonSoft,
+                        color = c.accentSoft,
                     )
                 }
             }
@@ -1044,54 +1251,64 @@ private fun ExpressiveAppCard(
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = if (entry.installed) entry.label else "${entry.label} (kurulu değil)",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = c.textPrimary,
+                        text = entry.label,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (entry.installed) c.textPrimary else c.textSecondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false),
                     )
                     if (whitelisted) {
-                        Spacer(Modifier.width(8.dp))
-                        Surface(
-                            shape = CircleShape,
-                            color = c.crimson.copy(alpha = 0.22f),
-                        ) {
-                            Text(
-                                text = "HI-RES",
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = c.crimsonSoft,
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
-                            )
-                        }
+                        Spacer(Modifier.width(6.dp))
+                        HiResBadge(text = "HI-RES")
                     }
                 }
-                Text(
-                    text = entry.packageName,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontSize = 11.5.sp,
-                    color = c.textSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Spacer(Modifier.height(1.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = entry.packageName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = c.textTertiary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (!entry.installed) {
+                        Spacer(Modifier.width(6.dp))
+                        Tag(text = "KURULU DEĞİL")
+                    }
+                }
             }
 
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(8.dp))
             Switch(
                 checked = whitelisted,
                 onCheckedChange = onToggle,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = c.crimson,
-                    uncheckedThumbColor = c.textSecondary,
-                    uncheckedTrackColor = c.subCardBg,
-                    uncheckedBorderColor = c.border,
-                ),
+                colors = arkSwitchColors(),
             )
         }
     }
 }
+
+@Composable
+private fun Tag(text: String) {
+    val c = LocalArkColors.current
+    Surface(
+        shape = RoundedCornerShape(5.dp),
+        color = c.raisedBg,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = c.textTertiary,
+            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 private fun formatKhz(rateHz: Int): String =
     if (rateHz % 1000 == 0) (rateHz / 1000).toString() else String.format(Locale.US, "%.1f", rateHz / 1000.0)
