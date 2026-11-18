@@ -37,17 +37,17 @@ public final class CodecBridge {
         final int rate = args.length > 1 ? safeInt(args[1]) : 0;
         final int bits = args.length > 2 ? safeInt(args[2]) : 0;
 
-        if ("probe".equals(action)) {
-            probe();
-            return;
-        }
-
         try {
             if (Looper.getMainLooper() == null) {
                 Looper.prepareMainLooper();
             }
         } catch (Throwable ignored) {
             // Looper already prepared by the runtime.
+        }
+
+        if ("probe".equals(action)) {
+            probe();
+            return;
         }
 
         final Looper looper = Looper.getMainLooper();
