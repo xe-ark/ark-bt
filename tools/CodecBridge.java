@@ -34,6 +34,9 @@ public final class CodecBridge {
 
     private static boolean sFrameworkInitialized;
 
+    /** uid-0 attribution source used for every raw A2DP binder call. */
+    private static Object sAttributionSource;
+
     private CodecBridge() {
     }
 
@@ -60,6 +63,7 @@ public final class CodecBridge {
         final Looper looper = Looper.getMainLooper();
         try {
             final Context ctx = systemContext();
+            sAttributionSource = buildAttributionSource(ctx, 0);
             final BluetoothManager manager =
                     (BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE);
             final BluetoothAdapter adapter = resolveAdapter(ctx, manager);
@@ -270,17 +274,40 @@ public final class CodecBridge {
         }
     }
 
+    /** Diagnostic string listing a proxy's fields, used when no service is found. */
+    private static String describeFields(Object target) {
+        if (target == null) {
+            return "null proxy";
+        }
+        StringBuilder sb = new StringBuilder(target.getClass().getName());
+        Class<?> type = target.getClass();
+        while (type != null && type != Object.class) {
+            for (java.lang.reflect.Field field : type.getDeclaredFields()) {
+                sb.append(" | ").append(field.getName())
+                        .append(':').append(field.getType().getSimpleName());
+            }
+            type = type.getSuperclass();
+        }
+        return sb.toString();
+    }
+
     private static String execute(BluetoothProfile proxy, String action, int rate, int bits) {
-        Object device = activeDevice(proxy);
+        Object raw = a2dpService(proxy);
+        Object attr = raw != null ? sAttributionSource : null;
+        Object session = raw != null ? raw : proxy;
+
+        Object device = activeDevice(session, attr);
         if (device == null) {
+            String fields = raw != null ? "raw IBluetoothA2dp" : describeFields(proxy);
             return error("no_active_device"
-                    + (sActiveDeviceError != null ? ": " + sActiveDeviceError : ""));
+                    + (sActiveDeviceError != null ? ": " + sActiveDeviceError : "")
+                    + " [" + fields + "]");
         }
 
         Object status;
         try {
-            status = callChecked(
-                    proxy, "getCodecStatus", new Class<?>[]{BluetoothDevice.class}, device);
+            status = callA2dp(session, attr, "getCodecStatus",
+                    new Class<?>[]{BluetoothDevice.class}, device);
         } catch (Throwable t) {
             return error("codec_status: " + describe(t));
         }
@@ -330,8 +357,9 @@ public final class CodecBridge {
                 Object newCfg = buildConfig(cfg, rateMask, bitsMask);
                 // Checked call: a rejected write must be reported as an error,
                 // not silently swallowed.
-                callChecked(
-                        proxy,
+                callA2dp(
+                        session,
+                        attr,
                         "setCodecConfigPreference",
                         new Class<?>[]{BluetoothDevice.class, newCfg.getClass()},
                         device,
@@ -339,8 +367,9 @@ public final class CodecBridge {
                 );
                 applied = true;
                 Thread.sleep(700);
-                Object after = call(
-                        proxy, "getCodecStatus", new Class<?>[]{BluetoothDevice.class}, device);
+                Object after = callA2dp(
+                        session, attr, "getCodecStatus",
+                        new Class<?>[]{BluetoothDevice.class}, device);
                 Object afterCfg = after != null
                         ? call(after, "getCodecConfig", new Class<?>[]{})
                         : null;
@@ -645,9 +674,9 @@ public final class CodecBridge {
         }
     }
 
-    private static Object activeDevice(BluetoothProfile proxy) {
+    private static Object activeDevice(Object session, Object attr) {
         try {
-            Object device = call(proxy, "getActiveDevice", new Class<?>[]{});
+            Object device = callA2dp(session, attr, "getActiveDevice", new Class<?>[]{});
             if (device != null) {
                 return device;
             }
@@ -656,13 +685,61 @@ public final class CodecBridge {
             sActiveDeviceError = "getActiveDevice: " + describe(t);
         }
         try {
-            List<?> connected = proxy.getConnectedDevices();
-            if (connected != null && !connected.isEmpty()) {
-                return connected.get(0);
+            Object connected = callA2dp(session, attr, "getConnectedDevices", new Class<?>[]{});
+            if (connected instanceof List<?> && !((List<?>) connected).isEmpty()) {
+                return ((List<?>) connected).get(0);
             }
             sActiveDeviceError += " / getConnectedDevices empty";
         } catch (Throwable t) {
             sActiveDeviceError += " / getConnectedDevices: " + describe(t);
+        }
+        return null;
+    }
+
+    /**
+     * Invokes an A2DP method.
+     *
+     * The raw {@code IBluetoothA2dp} interface takes an {@code AttributionSource}
+     * as its last argument, while the {@code BluetoothA2dp} profile wrapper
+     * does not. Appending it when present keeps a single code path for both.
+     */
+    private static Object callA2dp(
+            Object session, Object attr, String name, Class<?>[] baseTypes, Object... baseArgs)
+            throws Exception {
+        if (attr != null) {
+            Class<?>[] types = new Class<?>[baseTypes.length + 1];
+            System.arraycopy(baseTypes, 0, types, 0, baseTypes.length);
+            types[baseTypes.length] = attr.getClass();
+            Object[] args = new Object[baseArgs.length + 1];
+            System.arraycopy(baseArgs, 0, args, 0, baseArgs.length);
+            args[baseArgs.length] = attr;
+            return callChecked(session, name, types, args);
+        }
+        return callChecked(session, name, baseTypes, baseArgs);
+    }
+
+    /** Finds the raw IBluetoothA2dp instance held by a profile proxy. */
+    private static Object a2dpService(Object proxy) {
+        if (proxy == null) {
+            return null;
+        }
+        Class<?> type = proxy.getClass();
+        while (type != null && type != Object.class) {
+            for (java.lang.reflect.Field field : type.getDeclaredFields()) {
+                if (field.getType().getName().equals("android.bluetooth.IBluetoothA2dp")) {
+                    try {
+                        field.setAccessible(true);
+                        Object value = field.get(proxy);
+                        if (value != null) {
+                            System.err.println("using raw IBluetoothA2dp from " + field.getName());
+                            return value;
+                        }
+                    } catch (Throwable t) {
+                        System.err.println("could not read " + field.getName() + ": " + describe(t));
+                    }
+                }
+            }
+            type = type.getSuperclass();
         }
         return null;
     }
