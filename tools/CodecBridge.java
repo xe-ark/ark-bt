@@ -42,6 +42,7 @@ public final class CodecBridge {
         final String action = args.length > 0 ? args[0] : "read";
         final int rate = args.length > 1 ? safeInt(args[1]) : 0;
         final int bits = args.length > 2 ? safeInt(args[2]) : 0;
+        final int requestedCodec = args.length > 3 ? safeInt(args[3]) : 0;
 
         try {
             if (Looper.getMainLooper() == null) {
@@ -92,7 +93,7 @@ public final class CodecBridge {
                         } else if ("devices".equals(action)) {
                             result = listBondedDevices(adapter);
                         } else {
-                            result = execute(proxy, action, rate, bits);
+                            result = execute(proxy, action, rate, bits, requestedCodec);
                         }
                     } catch (Throwable t) {
                         result = error(describe(t));
@@ -345,7 +346,8 @@ public final class CodecBridge {
         return sb.toString();
     }
 
-    private static String execute(BluetoothProfile proxy, String action, int rate, int bits) {
+    private static String execute(
+            BluetoothProfile proxy, String action, int rate, int bits, int requestedCodec) {
         Object raw = a2dpService(proxy);
         Object attr = raw != null ? sAttributionSource : null;
         Object session = raw != null ? raw : proxy;
@@ -379,17 +381,25 @@ public final class CodecBridge {
         }
 
         int codecType = asInt(call(cfg, "getCodecType", new Class<?>[]{}));
+        if (requestedCodec > 0) {
+            codecType = requestedCodec;
+        }
         int selRateMask = 0;
         int selBitsMask = 0;
+        boolean capFound = false;
         Object caps = call(status, "getCodecsSelectableCapabilities", new Class<?>[]{});
         if (caps instanceof List<?>) {
             for (Object cap : (List<?>) caps) {
                 if (asInt(call(cap, "getCodecType", new Class<?>[]{})) == codecType) {
                     selRateMask = asInt(call(cap, "getSampleRate", new Class<?>[]{}));
                     selBitsMask = asInt(call(cap, "getBitsPerSample", new Class<?>[]{}));
+                    capFound = true;
                     break;
                 }
             }
+        }
+        if (requestedCodec > 0 && !capFound) {
+            return error("unsupported_codec");
         }
 
         boolean applied = false;
@@ -408,7 +418,7 @@ public final class CodecBridge {
                 return error("unsupported_bits");
             }
             try {
-                Object newCfg = buildConfig(cfg, rateMask, bitsMask);
+                Object newCfg = buildConfig(cfg, codecType, rateMask, bitsMask);
                 // Checked call: a rejected write must be reported as an error,
                 // not silently swallowed.
                 callA2dp(
@@ -429,6 +439,7 @@ public final class CodecBridge {
                         : null;
                 if (afterCfg != null) {
                     cfg = afterCfg;
+                    codecType = asInt(call(cfg, "getCodecType", new Class<?>[]{}));
                 }
             } catch (Throwable t) {
                 applyError = describe(t);
@@ -493,13 +504,13 @@ public final class CodecBridge {
         return sb.toString();
     }
 
-    private static Object buildConfig(Object current, int rateMask, int bitsMask) throws Exception {
+    private static Object buildConfig(Object current, int codecType, int rateMask, int bitsMask)
+            throws Exception {
         Class<?> builderClass = Class.forName("android.bluetooth.BluetoothCodecConfig$Builder");
         java.lang.reflect.Constructor<?> ctor = builderClass.getDeclaredConstructor();
         ctor.setAccessible(true);
         Object builder = ctor.newInstance();
 
-        int codecType = asInt(call(current, "getCodecType", new Class<?>[]{}));
         int channelMode = asInt(call(current, "getChannelMode", new Class<?>[]{}));
         long specific1 = asLong(call(current, "getCodecSpecific1", new Class<?>[]{}));
         long specific2 = asLong(call(current, "getCodecSpecific2", new Class<?>[]{}));
