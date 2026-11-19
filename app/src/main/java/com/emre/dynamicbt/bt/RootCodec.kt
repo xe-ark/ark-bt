@@ -221,7 +221,21 @@ object RootCodec {
             val storage = context.createDeviceProtectedStorageContext()
             val dir = storage.filesDir.apply { mkdirs() }
             val target = File(dir, DEX_FILE_NAME)
-            if (!target.isFile || target.length() == 0L) {
+            // The jar must be refreshed when the APK is updated, otherwise an
+            // old bridge (missing new JSON fields) keeps being executed.
+            val stamp = File(dir, "$DEX_FILE_NAME.version")
+            val version = try {
+                @Suppress("DEPRECATION")
+                context.packageManager
+                    .getPackageInfo(context.packageName, 0)
+                    .lastUpdateTime
+                    .toString()
+            } catch (t: Throwable) {
+                ""
+            }
+            val upToDate = target.isFile && target.length() > 0L && version.isNotEmpty() &&
+                stamp.isFile && stamp.readText(Charsets.UTF_8).trim() == version
+            if (!upToDate) {
                 val tmp = File(dir, "$DEX_FILE_NAME.tmp")
                 context.assets.open(ASSET_NAME).use { input ->
                     tmp.outputStream().use { output -> input.copyTo(output) }
@@ -230,6 +244,9 @@ object RootCodec {
                 if (!tmp.renameTo(target)) {
                     target.writeBytes(tmp.readBytes())
                     tmp.delete()
+                }
+                if (version.isNotEmpty()) {
+                    runCatching { stamp.writeText(version, Charsets.UTF_8) }
                 }
             }
             target.setReadable(true, false)
