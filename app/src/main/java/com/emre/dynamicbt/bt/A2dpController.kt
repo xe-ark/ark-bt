@@ -23,15 +23,34 @@ data class A2dpStateSnapshot(
     val bitsPerSample: Int = 0,
     val selectableRateMask: Int = CodecCaps.RATE_MASK_NONE,
     val selectableBitsMask: Int = CodecCaps.BITS_MASK_NONE,
+    /** Union of every selectable codec's masks; 0 when only the active codec is known. */
+    val bestRateMask: Int = CodecCaps.RATE_MASK_NONE,
+    val bestBitsMask: Int = CodecCaps.BITS_MASK_NONE,
+    val bestCodecName: String = "",
     val lastError: String? = null,
 ) {
+    /**
+     * True when the sink can reach hi-res audio through *some* codec, even if
+     * the one currently active is limited (AAC advertises 44.1 kHz only).
+     */
+    val hiresSelectable: Boolean
+        get() {
+            val hiresRates = CodecCaps.RATE_MASK_88200 or CodecCaps.RATE_MASK_96000 or
+                CodecCaps.RATE_MASK_176400 or CodecCaps.RATE_MASK_192000
+            val hiresBits = CodecCaps.BITS_MASK_24 or CodecCaps.BITS_MASK_32
+            val rates = if (bestRateMask != 0) bestRateMask else selectableRateMask
+            val bits = if (bestBitsMask != 0) bestBitsMask else selectableBitsMask
+            return (rates and hiresRates) != 0 || (bits and hiresBits) != 0
+        }
+
     fun toSinkCapabilities(): SinkCapabilities = SinkCapabilities(
         connected = connected,
         codecType = codecType,
         currentRateHz = sampleRateHz,
         currentBits = bitsPerSample,
-        selectableRateMask = selectableRateMask,
-        selectableBitsMask = selectableBitsMask,
+        selectableRateMask = bestRateMask.takeIf { it != 0 } ?: selectableRateMask,
+        selectableBitsMask = bestBitsMask.takeIf { it != 0 } ?: selectableBitsMask,
+        hiresSelectable = hiresSelectable,
     )
 }
 
@@ -119,6 +138,9 @@ class A2dpController(
             bitsPerSample = snapshot.bits,
             selectableRateMask = snapshot.selectableRateMask,
             selectableBitsMask = snapshot.selectableBitsMask,
+            bestRateMask = snapshot.bestRateMask,
+            bestBitsMask = snapshot.bestBitsMask,
+            bestCodecName = snapshot.bestCodecName,
             lastError = lastError,
         )
     }

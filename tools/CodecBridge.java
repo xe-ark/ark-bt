@@ -499,6 +499,27 @@ public final class CodecBridge {
             }
         }
 
+        // Union of every selectable codec: what the sink can reach if a codec
+        // switch is allowed. The app uses it so that picking 96 kHz while AAC
+        // is active escalates to LDAC instead of being clamped to 44.1 kHz.
+        int bestRateMask = 0;
+        int bestBitsMask = 0;
+        if (caps instanceof List<?>) {
+            for (Object cap : (List<?>) caps) {
+                try {
+                    bestRateMask |= asInt(call(cap, "getSampleRate", new Class<?>[]{}));
+                    bestBitsMask |= asInt(call(cap, "getBitsPerSample", new Class<?>[]{}));
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+        int bestCodec = highestPriorityCodec(caps);
+        if (bestCodec < 0) {
+            bestCodec = codecType;
+            bestRateMask = selRateMask;
+            bestBitsMask = selBitsMask;
+        }
+
         StringBuilder sb = new StringBuilder(256);
         sb.append('{');
         sb.append("\"ok\":").append(applyError == null).append(',');
@@ -511,6 +532,10 @@ public final class CodecBridge {
         sb.append("\"bits\":").append(currentBits).append(',');
         sb.append("\"selRateMask\":").append(selRateMask).append(',');
         sb.append("\"selBitsMask\":").append(selBitsMask).append(',');
+        sb.append("\"bestCodecType\":").append(bestCodec).append(',');
+        sb.append("\"bestCodec\":\"").append(codecName(bestCodec)).append("\",");
+        sb.append("\"bestRateMask\":").append(bestRateMask).append(',');
+        sb.append("\"bestBitsMask\":").append(bestBitsMask).append(',');
         sb.append("\"selRates\":\"").append(rateList(selRateMask)).append("\",");
         sb.append("\"selBits\":\"").append(bitsList(selBitsMask)).append("\",");
         sb.append("\"device\":\"").append(escape(deviceAddress)).append("\",");
@@ -539,6 +564,26 @@ public final class CodecBridge {
             }
         }
         return 0;
+    }
+
+    /** Codec type with the highest priority in the selectable list, or -1. */
+    private static int highestPriorityCodec(Object caps) {
+        if (!(caps instanceof List<?>)) {
+            return -1;
+        }
+        int best = -1;
+        int bestPriority = Integer.MIN_VALUE;
+        for (Object cap : (List<?>) caps) {
+            try {
+                int priority = asInt(call(cap, "getCodecPriority", new Class<?>[]{}));
+                if (priority > bestPriority) {
+                    bestPriority = priority;
+                    best = asInt(call(cap, "getCodecType", new Class<?>[]{}));
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        return best;
     }
 
     /** True when {@code codecType} can reach both masks. */

@@ -25,6 +25,10 @@ data class RootCodecSnapshot(
     val bits: Int,
     val selectableRateMask: Int,
     val selectableBitsMask: Int,
+    val bestCodecType: Int,
+    val bestCodecName: String,
+    val bestRateMask: Int,
+    val bestBitsMask: Int,
     val deviceAddress: String?,
     val deviceName: String?,
     val error: String?,
@@ -193,6 +197,12 @@ object RootCodec {
             bits = obj.optInt("bits", 0),
             selectableRateMask = obj.optInt("selRateMask", 0),
             selectableBitsMask = obj.optInt("selBitsMask", 0),
+            bestCodecType = obj.optInt("bestCodecType", obj.optInt("codecType", -1)),
+            bestCodecName = obj.optString("bestCodec", "").ifBlank {
+                CodecCaps.codecName(obj.optInt("codecType", -1))
+            },
+            bestRateMask = obj.optInt("bestRateMask", obj.optInt("selRateMask", 0)),
+            bestBitsMask = obj.optInt("bestBitsMask", obj.optInt("selBitsMask", 0)),
             deviceAddress = obj.optString("device", "").takeIf { it.isNotBlank() },
             deviceName = obj.optString("deviceName", "").takeIf { it.isNotBlank() },
             error = obj.optString("error", "").takeIf { it.isNotBlank() && it != "null" },

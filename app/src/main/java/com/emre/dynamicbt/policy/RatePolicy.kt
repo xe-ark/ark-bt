@@ -24,6 +24,8 @@ data class SinkCapabilities(
     val currentBits: Int,
     val selectableRateMask: Int,
     val selectableBitsMask: Int,
+    /** Sink can reach hi-res through a codec switch (root bridge escalates). */
+    val hiresSelectable: Boolean = false,
 )
 
 enum class PolicyMode {
@@ -126,7 +128,9 @@ class RatePolicy(
         val shouldApply = config.enabled &&
             outputIsBtA2dp &&
             sink.connected &&
-            CodecCaps.isDynamicCapable(sink.codecType) &&
+            // A hi-res-capable sink counts even when the codec that happens to
+            // be active right now is AAC/SBC: the root bridge switches codecs.
+            (CodecCaps.isDynamicCapable(sink.codecType) || sink.hiresSelectable) &&
             (rateMismatch || bitsMismatch) &&
             cooldownReady
 

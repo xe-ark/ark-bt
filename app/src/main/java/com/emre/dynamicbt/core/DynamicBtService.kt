@@ -179,6 +179,7 @@ class DynamicBtService : Service() {
 
     private var hasFailedApply = false
     private var lastFailedApplyMs = 0L
+    private var failedApplyCount = 0
     private var lastApplyWallMs = 0L
     private var lastApplySuccess: Boolean? = null
     private var lastWriteSource = "none"
@@ -332,8 +333,14 @@ class DynamicBtService : Service() {
 
         var postApplyA2dp: A2dpStateSnapshot? = null
 
+        // Back off when the sink keeps rejecting the target, so a stubborn
+        // device does not spawn a root process every few seconds.
+        val failCooldownMs = minOf(
+            60_000L,
+            cfg.applyCooldownMs * (1 + failedApplyCount),
+        )
         val failCooldownReady = !hasFailedApply ||
-            (nowMonoMs - lastFailedApplyMs >= cfg.applyCooldownMs)
+            (nowMonoMs - lastFailedApplyMs >= failCooldownMs)
         if (decision.shouldApply && failCooldownReady) {
             val rootResult = if (rootReady) {
                 RootCodec.apply(this, decision.targetRateHz, decision.targetBits)
@@ -365,10 +372,12 @@ class DynamicBtService : Service() {
             lastApplySuccess = ok
             if (ok) {
                 hasFailedApply = false
+                failedApplyCount = 0
                 ratePolicy.markApplied(nowMonoMs)
                 TrackFormatProbe.invalidateDumpCache("bluetooth_manager")
             } else {
                 hasFailedApply = true
+                failedApplyCount = minOf(failedApplyCount + 1, 10)
                 lastFailedApplyMs = nowMonoMs
             }
         }
@@ -451,6 +460,8 @@ class DynamicBtService : Service() {
             put("bt_codec_type", status.a2dp.codecType)
             put("bt_rate", status.a2dp.sampleRateHz)
             put("bt_bits", status.a2dp.bitsPerSample)
+            put("bt_best_codec", status.a2dp.bestCodecName)
+            put("bt_hires_selectable", status.a2dp.hiresSelectable)
             put("usb_connected", status.usb.connected)
             put("usb_device", status.usb.deviceName ?: JSONObject.NULL)
             put("last_apply_ms", status.lastApplyMs)
