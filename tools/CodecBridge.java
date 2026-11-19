@@ -396,6 +396,18 @@ public final class CodecBridge {
             }
         } catch (Throwable ignored) {
         }
+        if (deviceName.isEmpty() && sAttributionSource != null) {
+            // Newer builds require an attribution source for device metadata.
+            try {
+                Object name = callChecked(
+                        device, "getName",
+                        new Class<?>[]{sAttributionSource.getClass()}, sAttributionSource);
+                if (name != null) {
+                    deviceName = name.toString();
+                }
+            } catch (Throwable ignored) {
+            }
+        }
 
         StringBuilder sb = new StringBuilder(256);
         sb.append('{');

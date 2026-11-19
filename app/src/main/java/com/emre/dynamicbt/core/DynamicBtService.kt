@@ -303,12 +303,14 @@ class DynamicBtService : Service() {
         val nowMonoMs = SystemClock.elapsedRealtime()
 
         // Root is the only path that can read or write the A2DP codec config
-        // (BLUETOOTH_PRIVILEGED is not grantable to third-party apps).
+        // (BLUETOOTH_PRIVILEGED is not grantable to third-party apps). Spawning
+        // the bridge costs ~1 s of CPU, so it only runs while a Bluetooth A2DP
+        // output actually exists.
+        val outBtA2dp = playbackMonitor.isBluetoothA2dpOutputActive()
         val rootReady = RootCodec.rootAvailable(this)
-        val rootSnapshot = if (rootReady) RootCodec.read(this) else null
+        val rootSnapshot = if (rootReady && outBtA2dp) RootCodec.read(this) else null
 
         val tracks = playbackMonitor.queryActiveTracks(allowRootFallback = rootReady)
-        val outBtA2dp = playbackMonitor.isBluetoothA2dpOutputActive()
         val a2dp = when {
             rootSnapshot == null -> a2dpController.readState(allowRootFallback = rootReady)
             // Root answered but no sink is active: trust it, instead of
