@@ -512,10 +512,21 @@ public final class CodecBridge {
         Object builder = ctor.newInstance();
 
         int channelMode = asInt(call(current, "getChannelMode", new Class<?>[]{}));
-        long specific1 = asLong(call(current, "getCodecSpecific1", new Class<?>[]{}));
-        long specific2 = asLong(call(current, "getCodecSpecific2", new Class<?>[]{}));
-        long specific3 = asLong(call(current, "getCodecSpecific3", new Class<?>[]{}));
-        long specific4 = asLong(call(current, "getCodecSpecific4", new Class<?>[]{}));
+        int currentCodec = asInt(call(current, "getCodecType", new Class<?>[]{}));
+
+        // Codec-specific fields are only meaningful for the codec that defined
+        // them. Carrying AAC's values into an LDAC config makes the sink reject
+        // the preference and fall back to SBC, so reset them on a codec switch.
+        long specific1 = 0L;
+        long specific2 = 0L;
+        long specific3 = 0L;
+        long specific4 = 0L;
+        if (currentCodec == codecType) {
+            specific1 = asLong(call(current, "getCodecSpecific1", new Class<?>[]{}));
+            specific2 = asLong(call(current, "getCodecSpecific2", new Class<?>[]{}));
+            specific3 = asLong(call(current, "getCodecSpecific3", new Class<?>[]{}));
+            specific4 = asLong(call(current, "getCodecSpecific4", new Class<?>[]{}));
+        }
 
         callChecked(builder, "setCodecType", new Class<?>[]{int.class}, codecType);
         callChecked(builder, "setCodecPriority", new Class<?>[]{int.class}, 1000);
