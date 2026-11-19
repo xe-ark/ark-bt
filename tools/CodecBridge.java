@@ -87,7 +87,13 @@ public final class CodecBridge {
                     }
                     String result = null;
                     try {
-                        result = execute(proxy, action, rate, bits);
+                        if ("connect".equals(action)) {
+                            result = connectDevice(adapter, proxy, args.length > 1 ? args[1] : "");
+                        } else if ("devices".equals(action)) {
+                            result = listBondedDevices(adapter);
+                        } else {
+                            result = execute(proxy, action, rate, bits);
+                        }
                     } catch (Throwable t) {
                         result = error(describe(t));
                     } finally {
@@ -267,6 +273,58 @@ public final class CodecBridge {
             return sb.toString();
         } catch (Throwable t) {
             return "unavailable: " + describe(t);
+        }
+    }
+
+    /** Lists bonded devices, so callers can discover the sink address. */
+    private static String listBondedDevices(BluetoothAdapter adapter) {
+        StringBuilder sb = new StringBuilder(128);
+        sb.append('{');
+        try {
+            java.util.Set<BluetoothDevice> bonded = adapter.getBondedDevices();
+            sb.append("\"ok\":true,\"count\":").append(bonded.size()).append(",\"devices\":[");
+            boolean first = true;
+            for (BluetoothDevice device : bonded) {
+                if (!first) {
+                    sb.append(',');
+                }
+                first = false;
+                sb.append("{\"address\":\"").append(escape(device.getAddress()))
+                        .append("\",\"name\":\"").append(escape(String.valueOf(device.getName())))
+                        .append("\"}");
+            }
+            sb.append(']');
+        } catch (Throwable t) {
+            sb.append("\"ok\":false,\"error\":\"").append(escape(describe(t))).append('"');
+        }
+        sb.append('}');
+        return sb.toString();
+    }
+
+    /**
+     * Asks the A2DP service to connect to a bonded device.
+     *
+     * Handy when the sink dropped off: headphones that support LDAC are needed
+     * to exercise high sample rates, and there is no shell command for this.
+     */
+    private static String connectDevice(BluetoothAdapter adapter, BluetoothProfile proxy, String address) {
+        if (address == null || address.length() != 17) {
+            return error("bad_address");
+        }
+        Object raw = a2dpService(proxy);
+        Object attr = raw != null ? sAttributionSource : null;
+        Object session = raw != null ? raw : proxy;
+        try {
+            BluetoothDevice device = adapter.getRemoteDevice(address);
+            if (device == null) {
+                return error("unknown_device");
+            }
+            Object result = callA2dp(
+                    session, attr, "connect", new Class<?>[]{BluetoothDevice.class}, device);
+            return "{\"ok\":true,\"action\":\"connect\",\"device\":\"" + escape(address)
+                    + "\",\"result\":" + result + "}";
+        } catch (Throwable t) {
+            return error("connect: " + describe(t));
         }
     }
 
