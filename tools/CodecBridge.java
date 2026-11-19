@@ -208,13 +208,66 @@ public final class CodecBridge {
             sb.append("\"directAdapter\":").append(direct != null).append(',');
             sb.append("\"directState\":").append(direct != null
                     ? String.valueOf(call(direct, "getState", new Class<?>[]{}))
-                    : "null");
+                    : "null").append(',');
+
+            // Binder-level detail: if the adapter path stays blocked we want to
+            // know whether IBluetoothA2dp can be reached directly instead.
+            sb.append("\"ibmMethods\":\"").append(escape(methodList(
+                    "android.bluetooth.IBluetoothManager", 24))).append("\",");
+            sb.append("\"ia2dpMethods\":\"").append(escape(methodList(
+                    "android.bluetooth.IBluetoothA2dp", 40))).append("\",");
+            StringBuilder a2dpSvcs = new StringBuilder();
+            Class<?> smClass = Class.forName("android.os.ServiceManager");
+            Method listSvc = smClass.getDeclaredMethod("listServices");
+            listSvc.setAccessible(true);
+            String[] all = (String[]) listSvc.invoke(null);
+            if (all != null) {
+                for (String name : all) {
+                    if (name != null && (name.contains("a2dp")
+                            || name.contains("avrcp")
+                            || name.contains("profile"))) {
+                        if (a2dpSvcs.length() > 0) {
+                            a2dpSvcs.append('|');
+                        }
+                        a2dpSvcs.append(name);
+                    }
+                }
+            }
+            sb.append("\"profileSvcs\":\"").append(escape(a2dpSvcs.toString())).append("\"");
         } catch (Throwable t) {
             sb.append("\"error\":\"").append(escape(describe(t))).append("\",");
             sb.append("\"adapter\":false");
         }
         sb.append('}');
         print(sb.toString());
+    }
+
+    private static String methodList(String className, int limit) {
+        try {
+            Class<?> type = Class.forName(className);
+            StringBuilder sb = new StringBuilder();
+            for (Method m : type.getDeclaredMethods()) {
+                if (sb.length() > 0) {
+                    sb.append('|');
+                }
+                sb.append(m.getName()).append('(');
+                Class<?>[] params = m.getParameterTypes();
+                for (int i = 0; i < params.length; i++) {
+                    if (i > 0) {
+                        sb.append(',');
+                    }
+                    sb.append(params[i].getSimpleName());
+                }
+                sb.append(')');
+                if (--limit <= 0) {
+                    sb.append("|...");
+                    break;
+                }
+            }
+            return sb.toString();
+        } catch (Throwable t) {
+            return "unavailable: " + describe(t);
+        }
     }
 
     private static String execute(BluetoothProfile proxy, String action, int rate, int bits) {
