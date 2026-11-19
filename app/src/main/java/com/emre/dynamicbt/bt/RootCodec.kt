@@ -18,6 +18,8 @@ import java.util.concurrent.TimeUnit
 data class RootCodecSnapshot(
     val ok: Boolean,
     val applied: Boolean,
+    /** True when the bridge saw the requested codec/rate/bits become active. */
+    val confirmed: Boolean,
     val connected: Boolean,
     val codecType: Int,
     val codecName: String,
@@ -188,6 +190,7 @@ object RootCodec {
         return RootCodecSnapshot(
             ok = obj.optBoolean("ok", false),
             applied = obj.optBoolean("applied", false),
+            confirmed = obj.optBoolean("confirmed", true),
             connected = obj.optBoolean("connected", false),
             codecType = obj.optInt("codecType", -1),
             codecName = obj.optString("codec", "").ifBlank {

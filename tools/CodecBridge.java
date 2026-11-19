@@ -440,6 +440,7 @@ public final class CodecBridge {
         }
 
         boolean applied = false;
+        boolean confirmed = true;
         String applyError = null;
 
         if ("apply".equals(action)) {
@@ -465,6 +466,7 @@ public final class CodecBridge {
                 // The stack renegotiates asynchronously: a 700 ms read still
                 // reports the old codec, which made callers think the write
                 // failed. Poll until the active config matches, or give up.
+                confirmed = false;
                 long deadline = System.currentTimeMillis() + 6000L;
                 while (System.currentTimeMillis() < deadline) {
                     Thread.sleep(250L);
@@ -481,8 +483,15 @@ public final class CodecBridge {
                     if (asInt(call(cfg, "getCodecType", new Class<?>[]{})) == targetCodec
                             && (rateMask & asInt(call(cfg, "getSampleRate", new Class<?>[]{}))) != 0
                             && (bitsMask & asInt(call(cfg, "getBitsPerSample", new Class<?>[]{}))) != 0) {
+                        confirmed = true;
                         break;
                     }
+                }
+                if (!confirmed && applyError == null) {
+                    // The preference was accepted but the stack has not
+                    // renegotiated yet (it usually waits for the next stream
+                    // start). Report it instead of claiming success.
+                    applyError = "switch_pending";
                 }
             } catch (Throwable t) {
                 applyError = describe(t);
@@ -554,6 +563,7 @@ public final class CodecBridge {
         sb.append("\"ok\":").append(applyError == null).append(',');
         sb.append("\"action\":\"").append(action).append("\",");
         sb.append("\"applied\":").append(applied).append(',');
+        sb.append("\"confirmed\":").append(confirmed).append(',');
         sb.append("\"connected\":true,");
         sb.append("\"codecType\":").append(codecType).append(',');
         sb.append("\"codec\":\"").append(codecName(codecType)).append("\",");

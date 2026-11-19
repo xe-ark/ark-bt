@@ -973,6 +973,24 @@ private fun TelemetryCard(
                 color = c.textSecondary,
             )
 
+            val upgradeHint = status.a2dp.connected &&
+                status.a2dp.hiresSelectable &&
+                status.a2dp.bestCodecName.isNotBlank() &&
+                !status.a2dp.codecName.equals(status.a2dp.bestCodecName, ignoreCase = true)
+            AnimatedVisibility(
+                visible = upgradeHint,
+                enter = fadeIn(tween(240)) + expandVertically(tween(240)),
+                exit = fadeOut(tween(140)) + shrinkVertically(tween(140)),
+            ) {
+                Text(
+                    text = "${status.a2dp.bestCodecName} açıkken " +
+                        "${formatKhz(status.targetRateHz)} kHz / ${status.targetBits}-bit yazılabilir",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = c.accent.copy(alpha = 0.85f),
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+
             Spacer(Modifier.height(14.dp))
             HorizontalDivider(color = c.border)
             Spacer(Modifier.height(4.dp))

@@ -351,13 +351,17 @@ class DynamicBtService : Service() {
             val ok = when {
                 rootResult != null -> {
                     lastWriteSource = "root"
-                    if (rootResult.ok && rootResult.applied) {
+                    if (rootResult.ok && rootResult.applied && rootResult.confirmed) {
                         postApplyA2dp = a2dpController.snapshotFromRoot(rootResult)
                         true
                     } else {
-                        a2dpController.noteError(
-                            rootResult.error ?: "Köprü kodek yazımını doğrulayamadı",
-                        )
+                        val message = when (rootResult.error) {
+                            "switch_pending" ->
+                                "Kodek geçişi ses akışı başlayınca tamamlanacak"
+                            null, "" -> "Köprü kodek yazımını doğrulayamadı"
+                            else -> rootResult.error
+                        }
+                        a2dpController.noteError(message)
                         false
                     }
                 }
