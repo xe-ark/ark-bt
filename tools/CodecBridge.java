@@ -32,8 +32,6 @@ public final class CodecBridge {
     /** Why the last device lookup came back empty; folded into error output. */
     private static String sActiveDeviceError;
 
-    private static boolean sFrameworkInitialized;
-
     /** uid-0 attribution source used for every raw A2DP binder call. */
     private static Object sAttributionSource;
 
@@ -57,8 +55,6 @@ public final class CodecBridge {
             probe();
             return;
         }
-
-        ensureBluetoothFrameworkInitialized();
 
         final Looper looper = Looper.getMainLooper();
         try {
@@ -466,7 +462,6 @@ public final class CodecBridge {
      * the adapter from the raw IBluetoothManager binder works in that case.
      */
     private static BluetoothAdapter resolveAdapter(Context context, BluetoothManager manager) {
-        ensureBluetoothFrameworkInitialized();
         if (manager != null) {
             try {
                 BluetoothAdapter adapter = manager.getAdapter();
@@ -524,104 +519,6 @@ public final class CodecBridge {
             System.err.println("no usable BluetoothAdapter constructor");
         } catch (Throwable t) {
             System.err.println("direct adapter build failed: " + describe(t));
-        }
-        return null;
-    }
-
-    /**
-     * Installs the Bluetooth service registerer.
-     *
-     * `app_process` starts a bare runtime without the `SystemServiceRegistry`
-     * bootstrap, so `android.os.BluetoothServiceManager` has no registerer and
-     * every profile call dies with a NullPointerException. Registering the
-     * "bluetooth_manager" binder directly is more reliable than replaying the
-     * module bootstrap, which refuses to run outside class initialization.
-     */
-    private static synchronized void ensureBluetoothFrameworkInitialized() {
-        if (sFrameworkInitialized) {
-            return;
-        }
-
-        // Preferred: run the real framework bootstrap. It knows exactly where
-        // the registerer belongs, including future layout changes.
-        try {
-            Class<?> registry = Class.forName("android.app.SystemServiceRegistry");
-            Method register = registry.getDeclaredMethod("registerServiceWrappers");
-            register.setAccessible(true);
-            register.invoke(null);
-            Class<?> bsm = Class.forName("android.os.BluetoothServiceManager");
-            if (haveServiceRegisterer(bsm)) {
-                sFrameworkInitialized = true;
-                System.err.println("SystemServiceRegistry.registerServiceWrappers() ok");
-                return;
-            }
-            System.err.println("registerServiceWrappers ran, registerer still null");
-        } catch (Throwable t) {
-            System.err.println("SystemServiceRegistry bootstrap failed: " + describe(t));
-        }
-
-        try {
-            Class<?> bsm = Class.forName("android.os.BluetoothServiceManager");
-            if (haveServiceRegisterer(bsm)) {
-                sFrameworkInitialized = true;
-                return;
-            }
-
-            Class<?> registererClass =
-                    Class.forName("android.os.BluetoothServiceManager$ServiceRegisterer");
-            Object registerer = newServiceRegisterer(registererClass);
-            if (registerer == null) {
-                System.err.println("could not construct a ServiceRegisterer");
-                return;
-            }
-
-            int installed = 0;
-            for (java.lang.reflect.Field field : bsm.getDeclaredFields()) {
-                if (!field.getType().isAssignableFrom(registererClass)) {
-                    continue;
-                }
-                field.setAccessible(true);
-                if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
-                    field.set(null, registerer);
-                    installed++;
-                }
-            }
-
-            if (haveServiceRegisterer(bsm)) {
-                sFrameworkInitialized = true;
-                System.err.println("installed bluetooth_manager ServiceRegisterer");
-            } else {
-                System.err.println("ServiceRegisterer fields patched=" + installed
-                        + " but getter still null");
-            }
-        } catch (Throwable t) {
-            System.err.println("bluetooth registerer install failed: " + describe(t));
-        }
-    }
-
-    private static boolean haveServiceRegisterer(Class<?> bsm) {
-        try {
-            Method getter = bsm.getDeclaredMethod("getBluetoothManagerServiceRegisterer");
-            getter.setAccessible(true);
-            return getter.invoke(null) != null;
-        } catch (Throwable t) {
-            return false;
-        }
-    }
-
-    private static Object newServiceRegisterer(Class<?> registererClass) {
-        for (java.lang.reflect.Constructor<?> ctor : registererClass.getDeclaredConstructors()) {
-            Class<?>[] types = ctor.getParameterTypes();
-            try {
-                ctor.setAccessible(true);
-                if (types.length == 1 && types[0] == String.class) {
-                    return ctor.newInstance("bluetooth_manager");
-                }
-                if (types.length == 0) {
-                    return ctor.newInstance();
-                }
-            } catch (Throwable ignored) {
-            }
         }
         return null;
     }
