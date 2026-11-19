@@ -90,8 +90,10 @@ public final class CodecBridge {
                     try {
                         if ("connect".equals(action)) {
                             result = connectDevice(adapter, proxy, args.length > 1 ? args[1] : "");
-                        } else if ("devices".equals(action)) {
-                            result = listBondedDevices(adapter);
+                        } else if ("reconnect".equals(action)) {
+                            result = reconnectDevice(adapter, proxy, args.length > 1 ? args[1] : "");
+                        } else if ("optional".equals(action)) {
+                            result = optionalCodecs(proxy, args.length > 1 && safeInt(args[1]) != 0);
                         } else {
                             result = execute(proxy, action, rate, bits, requestedCodec);
                         }
@@ -277,31 +279,6 @@ public final class CodecBridge {
         }
     }
 
-    /** Lists bonded devices, so callers can discover the sink address. */
-    private static String listBondedDevices(BluetoothAdapter adapter) {
-        StringBuilder sb = new StringBuilder(128);
-        sb.append('{');
-        try {
-            java.util.Set<BluetoothDevice> bonded = adapter.getBondedDevices();
-            sb.append("\"ok\":true,\"count\":").append(bonded.size()).append(",\"devices\":[");
-            boolean first = true;
-            for (BluetoothDevice device : bonded) {
-                if (!first) {
-                    sb.append(',');
-                }
-                first = false;
-                sb.append("{\"address\":\"").append(escape(device.getAddress()))
-                        .append("\",\"name\":\"").append(escape(String.valueOf(device.getName())))
-                        .append("\"}");
-            }
-            sb.append(']');
-        } catch (Throwable t) {
-            sb.append("\"ok\":false,\"error\":\"").append(escape(describe(t))).append('"');
-        }
-        sb.append('}');
-        return sb.toString();
-    }
-
     /**
      * Asks the A2DP service to connect to a bonded device.
      *
@@ -326,6 +303,58 @@ public final class CodecBridge {
                     + "\",\"result\":" + result + "}";
         } catch (Throwable t) {
             return error("connect: " + describe(t));
+        }
+    }
+
+
+    /**
+     * Disconnects then reconnects the sink.
+     *
+     * Some vendor stacks only pick up a stored codec preference when the A2DP
+     * stream is renegotiated from scratch.
+     */
+    private static String reconnectDevice(
+            BluetoothAdapter adapter, BluetoothProfile proxy, String address) {
+        if (address == null || address.length() != 17) {
+            return error("bad_address");
+        }
+        Object raw = a2dpService(proxy);
+        Object attr = raw != null ? sAttributionSource : null;
+        Object session = raw != null ? raw : proxy;
+        try {
+            BluetoothDevice device = adapter.getRemoteDevice(address);
+            Object disconnected = callA2dp(
+                    session, attr, "disconnect", new Class<?>[]{BluetoothDevice.class}, device);
+            Thread.sleep(1200L);
+            Object connected = callA2dp(
+                    session, attr, "connect", new Class<?>[]{BluetoothDevice.class}, device);
+            return "{\"ok\":true,\"action\":\"reconnect\",\"device\":\"" + escape(address)
+                    + "\",\"disconnected\":" + disconnected + ",\"connected\":" + connected + "}";
+        } catch (Throwable t) {
+            return error("reconnect: " + describe(t));
+        }
+    }
+
+    /**
+     * Enables or disables the optional codecs for the active sink.
+     *
+     * Toggling forces the stack to renegotiate the codec, which is the only
+     * reliable way to make a stored LDAC preference take effect on MIUI.
+     */
+    private static String optionalCodecs(BluetoothProfile proxy, boolean enable) {
+        Object raw = a2dpService(proxy);
+        Object attr = raw != null ? sAttributionSource : null;
+        Object session = raw != null ? raw : proxy;
+        Object device = activeDevice(session, attr);
+        if (device == null) {
+            return error("no_active_device");
+        }
+        String name = enable ? "enableOptionalCodecs" : "disableOptionalCodecs";
+        try {
+            callA2dp(session, attr, name, new Class<?>[]{BluetoothDevice.class}, device);
+            return "{\"ok\":true,\"action\":\"optional\",\"enabled\":" + enable + "}";
+        } catch (Throwable t) {
+            return error("optional: " + describe(t));
         }
     }
 
