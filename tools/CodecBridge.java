@@ -380,25 +380,33 @@ public final class CodecBridge {
             return error("codec_config_null");
         }
 
-        int codecType = asInt(call(cfg, "getCodecType", new Class<?>[]{}));
-        if (requestedCodec > 0) {
-            codecType = requestedCodec;
-        }
-        int selRateMask = 0;
-        int selBitsMask = 0;
-        boolean capFound = false;
+        int activeCodec = asInt(call(cfg, "getCodecType", new Class<?>[]{}));
         Object caps = call(status, "getCodecsSelectableCapabilities", new Class<?>[]{});
-        if (caps instanceof List<?>) {
-            for (Object cap : (List<?>) caps) {
-                if (asInt(call(cap, "getCodecType", new Class<?>[]{})) == codecType) {
-                    selRateMask = asInt(call(cap, "getSampleRate", new Class<?>[]{}));
-                    selBitsMask = asInt(call(cap, "getBitsPerSample", new Class<?>[]{}));
-                    capFound = true;
-                    break;
+
+        int rateMask = rateMask(rate);
+        int bitsMask = bitsMask(bits);
+        int targetCodec = activeCodec;
+        if ("apply".equals(action)) {
+            if (rateMask == 0 || bitsMask == 0) {
+                return error("bad_target");
+            }
+            if (requestedCodec > 0) {
+                targetCodec = requestedCodec;
+            } else if (!supports(caps, activeCodec, rateMask, bitsMask)) {
+                // The active codec cannot reach the requested rate/bits, so
+                // fall forward to the best codec that can (LDAC over AAC/SBC).
+                int best = bestCodecFor(caps, rateMask, bitsMask, activeCodec);
+                if (best >= 0) {
+                    targetCodec = best;
                 }
             }
+        } else if (requestedCodec > 0) {
+            targetCodec = requestedCodec;
         }
-        if (requestedCodec > 0 && !capFound) {
+
+        int selRateMask = capMask(caps, targetCodec, "getSampleRate");
+        int selBitsMask = capMask(caps, targetCodec, "getBitsPerSample");
+        if (requestedCodec > 0 && selRateMask == 0 && selBitsMask == 0) {
             return error("unsupported_codec");
         }
 
@@ -406,11 +414,6 @@ public final class CodecBridge {
         String applyError = null;
 
         if ("apply".equals(action)) {
-            int rateMask = rateMask(rate);
-            int bitsMask = bitsMask(bits);
-            if (rateMask == 0 || bitsMask == 0) {
-                return error("bad_target");
-            }
             if (selRateMask != 0 && (rateMask & selRateMask) == 0) {
                 return error("unsupported_rate");
             }
@@ -418,7 +421,7 @@ public final class CodecBridge {
                 return error("unsupported_bits");
             }
             try {
-                Object newCfg = buildConfig(cfg, codecType, rateMask, bitsMask);
+                Object newCfg = buildConfig(cfg, targetCodec, rateMask, bitsMask);
                 // Checked call: a rejected write must be reported as an error,
                 // not silently swallowed.
                 callA2dp(
@@ -430,20 +433,38 @@ public final class CodecBridge {
                         newCfg
                 );
                 applied = true;
-                Thread.sleep(700);
-                Object after = callA2dp(
-                        session, attr, "getCodecStatus",
-                        new Class<?>[]{BluetoothDevice.class}, device);
-                Object afterCfg = after != null
-                        ? call(after, "getCodecConfig", new Class<?>[]{})
-                        : null;
-                if (afterCfg != null) {
+                // The stack renegotiates asynchronously: a 700 ms read still
+                // reports the old codec, which made callers think the write
+                // failed. Poll until the active config matches, or give up.
+                long deadline = System.currentTimeMillis() + 6000L;
+                while (System.currentTimeMillis() < deadline) {
+                    Thread.sleep(250L);
+                    Object after = callA2dp(
+                            session, attr, "getCodecStatus",
+                            new Class<?>[]{BluetoothDevice.class}, device);
+                    Object afterCfg = after != null
+                            ? call(after, "getCodecConfig", new Class<?>[]{})
+                            : null;
+                    if (afterCfg == null) {
+                        continue;
+                    }
                     cfg = afterCfg;
-                    codecType = asInt(call(cfg, "getCodecType", new Class<?>[]{}));
+                    if (asInt(call(cfg, "getCodecType", new Class<?>[]{})) == targetCodec
+                            && (rateMask & asInt(call(cfg, "getSampleRate", new Class<?>[]{}))) != 0
+                            && (bitsMask & asInt(call(cfg, "getBitsPerSample", new Class<?>[]{}))) != 0) {
+                        break;
+                    }
                 }
             } catch (Throwable t) {
                 applyError = describe(t);
             }
+        }
+
+        int codecType = asInt(call(cfg, "getCodecType", new Class<?>[]{}));
+        if ("apply".equals(action)) {
+            // Report the codec that is actually active after renegotiation.
+            selRateMask = capMask(caps, codecType, "getSampleRate");
+            selBitsMask = capMask(caps, codecType, "getBitsPerSample");
         }
 
         int currentRate = maskToRate(asInt(call(cfg, "getSampleRate", new Class<?>[]{})));
@@ -502,6 +523,61 @@ public final class CodecBridge {
         }
         sb.append('}');
         return sb.toString();
+    }
+
+    /** Reads one selectable mask (sample rate or bit depth) for a codec type. */
+    private static int capMask(Object caps, int codecType, String getter) {
+        if (!(caps instanceof List<?>)) {
+            return 0;
+        }
+        for (Object cap : (List<?>) caps) {
+            try {
+                if (asInt(call(cap, "getCodecType", new Class<?>[]{})) == codecType) {
+                    return asInt(call(cap, getter, new Class<?>[]{}));
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        return 0;
+    }
+
+    /** True when {@code codecType} can reach both masks. */
+    private static boolean supports(Object caps, int codecType, int rateMask, int bitsMask) {
+        int rates = capMask(caps, codecType, "getSampleRate");
+        int depths = capMask(caps, codecType, "getBitsPerSample");
+        return rates != 0 && depths != 0
+                && (rateMask & rates) != 0
+                && (bitsMask & depths) != 0;
+    }
+
+    /**
+     * Picks the highest-priority codec (other than {@code exclude}) that can
+     * reach both masks, or -1 when nothing qualifies.
+     */
+    private static int bestCodecFor(Object caps, int rateMask, int bitsMask, int exclude) {
+        if (!(caps instanceof List<?>)) {
+            return -1;
+        }
+        int best = -1;
+        int bestPriority = Integer.MIN_VALUE;
+        for (Object cap : (List<?>) caps) {
+            try {
+                int codecType = asInt(call(cap, "getCodecType", new Class<?>[]{}));
+                if (codecType == exclude) {
+                    continue;
+                }
+                if (!supports(caps, codecType, rateMask, bitsMask)) {
+                    continue;
+                }
+                int priority = asInt(call(cap, "getCodecPriority", new Class<?>[]{}));
+                if (priority > bestPriority) {
+                    bestPriority = priority;
+                    best = codecType;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        return best;
     }
 
     private static Object buildConfig(Object current, int codecType, int rateMask, int bitsMask)
