@@ -13,8 +13,8 @@ android {
         applicationId = "com.emre.dynamicbt"
         minSdk = 27
         targetSdk = 37
-        versionCode = 101
-        versionName = "1.1"
+        versionCode = 102
+        versionName = "1.1.1"
     }
 
     // CI provides a stable signing key through env vars so consecutive builds
