@@ -1027,8 +1027,14 @@ private fun TelemetryCard(
             TelemetryRow(
                 label = "Parça formatı",
                 value = status.activeTrackRateHz?.let { "${formatKhz(it)} kHz" } ?: "—",
-                detail = status.activeTrackRateHz?.let { "${status.activeTrackBits ?: "?"}-bit akış" }
-                    ?: "Beklemede",
+                detail = when {
+                    status.activeTrackRateHz == null -> "Beklemede"
+                    (status.activeTrackBits ?: 0) > 0 &&
+                        status.a2dp.bitsPerSample > (status.activeTrackBits ?: 0) ->
+                        "${status.activeTrackBits}-bit akış · bağlantı " +
+                            "${status.a2dp.bitsPerSample}-bit"
+                    else -> "${status.activeTrackBits ?: "?"}-bit akış"
+                },
                 accent = (status.activeTrackRateHz ?: 0) > 48000,
                 showDivider = true,
             )
@@ -1414,7 +1420,7 @@ private fun PolicyCard(
             }
 
             Spacer(Modifier.height(16.dp))
-            SectionLabel("Bit derinliği")
+            SectionLabel("Bit derinliği · alt sınır")
             Spacer(Modifier.height(8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1431,6 +1437,12 @@ private fun PolicyCard(
                     )
                 }
             }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "Bağlantı bu değerin altına inmez; parça daha yüksekse parçayı izler",
+                style = MaterialTheme.typography.bodySmall,
+                color = c.textTertiary,
+            )
 
             Spacer(Modifier.height(18.dp))
             val secs = debounceSlider / 1000f

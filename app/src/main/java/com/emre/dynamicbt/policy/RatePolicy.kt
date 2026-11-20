@@ -88,11 +88,15 @@ class RatePolicy(
             } else {
                 config.defaultRateHz
             }
-            rawBits = if (whitelistedTrack.bitsPerSample > 0) {
-                whitelistedTrack.bitsPerSample
-            } else {
-                config.defaultBits
-            }
+            // Bit depth is a *floor*, not a follower: the track's AudioTrack
+            // reports what the mixer was given, which is often 16-bit even
+            // when the file is 24-bit (spatializer, direct output, etc.).
+            // Negotiating below the configured value would needlessly throw
+            // away resolution on the Bluetooth link.
+            rawBits = maxOf(
+                whitelistedTrack.bitsPerSample.takeIf { it > 0 } ?: 0,
+                config.defaultBits,
+            )
         } else if (wasDynamic && config.debounceMs > 0L) {
             if (whitelistEmptySinceMs == null) {
                 whitelistEmptySinceMs = nowMs
