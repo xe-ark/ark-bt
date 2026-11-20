@@ -480,7 +480,12 @@ public final class CodecBridge {
                         continue;
                     }
                     cfg = afterCfg;
-                    if (asInt(call(cfg, "getCodecType", new Class<?>[]{})) == targetCodec
+                    int seenCodec = asInt(call(cfg, "getCodecType", new Class<?>[]{}));
+                    // The requested rate/bits are what the user asked for; the
+                    // stack may satisfy them with a different codec, which is
+                    // still a success. An explicit codec request must match.
+                    boolean codecOk = requestedCodec <= 0 || seenCodec == requestedCodec;
+                    if (codecOk
                             && (rateMask & asInt(call(cfg, "getSampleRate", new Class<?>[]{}))) != 0
                             && (bitsMask & asInt(call(cfg, "getBitsPerSample", new Class<?>[]{}))) != 0) {
                         confirmed = true;
@@ -689,7 +694,9 @@ public final class CodecBridge {
         }
 
         callChecked(builder, "setCodecType", new Class<?>[]{int.class}, codecType);
-        callChecked(builder, "setCodecPriority", new Class<?>[]{int.class}, 1000);
+        // BluetoothCodecConfig.CODEC_PRIORITY_HIGHEST. Anything lower lets the
+        // stack keep a different codec (e.g. AAC) even though the pref was set.
+        callChecked(builder, "setCodecPriority", new Class<?>[]{int.class}, 1000000);
         callChecked(builder, "setSampleRate", new Class<?>[]{int.class}, rateMask);
         callChecked(builder, "setBitsPerSample", new Class<?>[]{int.class}, bitsMask);
         callChecked(builder, "setChannelMode", new Class<?>[]{int.class}, channelMode);
